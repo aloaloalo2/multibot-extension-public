@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <image href="icon128.png" width="128" height="128"/>
+
+  <!-- Match the original tile color to cover only the old download glyph. -->
+  <rect x="22" y="14" width="84" height="100" rx="19" fill="#1b1e24"/>
+
+  <!-- Three readable rows form the Multi Bot list mark. -->
+  <g fill="#9aa0a6">
+    <circle cx="38" cy="41" r="5"/>
+    <rect x="52" y="36" width="43" height="10" rx="5"/>
+    <circle cx="38" cy="64" r="5"/>
+    <rect x="52" y="59" width="43" height="10" rx="5"/>
+    <circle cx="38" cy="87" r="5"/>
+    <rect x="52" y="82" width="43" height="10" rx="5"/>
+  </g>
+</svg>

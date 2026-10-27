@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --font-apple: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+      --studio-bg: #0f0f0f;
+      --studio-surface: #212121;
+      --studio-surface-raised: #292929;
+      --studio-control: #303030;
+      --studio-hover: #3a3a3a;
+      --studio-border: #383838;
+      --studio-text: #f1f1f1;
+      --studio-muted: #aaaaaa;
+      --studio-blue: #3ea6ff;
+      --studio-blue-hover: #65b7ff;
+      --switch-track-off: #3a3e46;
+      --switch-track-on: var(--studio-blue);
+      --switch-thumb-off: #9aa0a6;
+      --switch-thumb-on: #0a3c64;
+      --switch-width: 38px;
+      --switch-height: 20px;
+      --switch-thumb-size: 16px;
+    }
+    body {
+      margin: 0;
+      width: 404px;
+      font-family: var(--font-apple);
+      background: var(--studio-bg);
+      color: #f2f2f2;
+      /* По бокам отступ больше вертикального: содержимое не липнет к краю
+         окна (пользователь, 2026-08-23). Ширина панели при этом та же. */
+      padding: 16px 26px;
+      box-sizing: border-box;
+    }
+    h1 {
+      font-size: 14px;
+      margin: 0 0 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    /* Строка состояния это просто текст, нажать её нельзя. Подложку не даём:
+       залитый прямоугольник читается как кнопка и путает
+       (пользователь, 2026-08-23). Плашки остаются только у кнопок. */
+    .status {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 2px 0;
+      margin-bottom: 8px;
+    }
+    .status.good { color: #35c838; }
+    .status.bad  { color: #ff6b6b; }
+    .status.wait { color: #9aa0a6; }
+    /* Полоса прогресса под счётчиком: видно продвижение, не вчитываясь в цифры */
+    #flowBar {
+      height: 6px;
+      border-radius: 4px;
+      background: #33363c;
+      overflow: hidden;
+      /* Полоса стояла вплотную к строке состояния из-за отрицательного поля
+         и читалась как её подчёркивание (пользователь, 2026-08-23). */
+      margin: 4px 0 12px;
+      display: none;
+    }
+    #flowBar > i {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: 4px;
+      background: #35c838;
+      transition: width .25s ease;
+    }
+    #flowBar.wait > i { background: #f0b429; }
+    #flowBar.bad  > i { background: #ff6b6b; }
+    .info {
+      font-size: 12px;
+      line-height: 1.4;
+      color: #9aa0a6;
+      margin-bottom: 10px;
+    }
+    /* Пока подписи нет, она не должна держать пустую полосу в четверть кнопки.
+       Раньше тут стоял min-height и панель открывалась с дырой. */
+    .info:empty { display: none; }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 10px;
+      background: #00c3ff;
+      color: #06131a;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button, input, select, textarea { font-family: var(--font-apple); }
+    button:disabled {
+      background: #2c2f36;
+      color: #6b6f76;
+      cursor: not-allowed;
+    }
+    button:not(:disabled):hover { background: #29d0ff; }
+    /* Кнопка проваливается под пальцем: без этого клик не чувствуется */
+    button:not(:disabled):active { transform: translateY(1px); }
+    button, select, input, summary, .sw { transition: background .12s ease; }
+    /* Обводка только для клавиатуры, мышью её не видно */
+    button:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--studio-blue);
+      outline-offset: 2px;
+    }
+    /* У ползунков обводку вешаем на видимую дорожку, а не на сам чекбокс:
+       он размером ноль и спрятан под opacity, обводить там нечего.
+       Через :focus-within нельзя, он срабатывает и на клик мышью, и вокруг
+       ползунка оставался синий квадрат после каждого нажатия
+       (пользователь, 2026-08-24). :focus-visible на чекбоксе Chrome зажигает
+       только при переходе табом, что и нужно. */
+    .sw input:focus-visible + i {
+      outline: 2px solid var(--studio-blue);
+      outline-offset: 2px;
+    }
+    /* Скачивание доступно только когда файл найден: тогда кнопка зелёная,
+       тем же цветом, что «Начать» в блоке Flow (пользователь, 2026-08-23).
+       Пока не найдено, кнопка disabled и остаётся серой. */
+    #dl:not(:disabled), #dlAudio:not(:disabled) { background: #2e9e4f; color: #fff; }
+    #dl:not(:disabled):hover, #dlAudio:not(:disabled):hover { background: #37b95d; }
+
+    /* Кнопки со значком: значок и подпись в одну строку по центру */
+    #dl, #dlAudio, #refreshAudio {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .ic { flex: 0 0 auto; }
+    /* Динамик перед строкой с длительностью аудио */
+    .info .spk { vertical-align: -2px; margin-right: 5px; opacity: .8; }
+    /* Ползунки внутри блока: «Прятать большие каналы» и «Показать доход».
+       Оба открывают под собой поле с числом, порог подписчиков и RPM
+       (пользователь, 2026-08-24). Из шапки блока ползунок убран. */
+    .sw {
+      cursor: pointer;
+      margin-left: auto;
+      position: relative;
+      display: inline-block;
+      width: var(--switch-width);
+      height: var(--switch-height);
+      flex: 0 0 auto;
+    }
+    .sw input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      margin: 0;
+      cursor: pointer;
+    }
+    .sw i {
+      position: absolute;
+      inset: 0;
+      background: var(--switch-track-off);
+      border-radius: 999px;
+      transition: background .15s;
+    }
+    .sw i::before {
+      content: "";
+      position: absolute;
+      width: var(--switch-thumb-size);
+      height: var(--switch-thumb-size);
+      left: 2px;
+      top: 2px;
+      background: var(--switch-thumb-off);
+      border-radius: 50%;
+      transition: transform .15s, background .15s;
+    }
+    .sw input:checked + i { background: var(--switch-track-on); }
+    .sw input:checked + i::before {
+      transform: translateX(calc(var(--switch-width) - var(--switch-thumb-size) - 4px));
+      background: var(--switch-thumb-on);
+    }
+    summary {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: .1px;
+      cursor: pointer;
+      padding: 8px 10px;
+      margin: 0 -10px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 10px;
+      background: #1f2126;
+      color: #c8ccd2;
+      list-style: none;
+      user-select: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: "▸";
+      display: inline-block;
+      width: 9px;
+      color: #6b6f76;
+    }
+    details[open] summary { margin-bottom: 10px; }
+    details[open] { margin-bottom: 2px; }
+    /* Раскрытый блок помечаем цветом стрелки: видно с одного взгляда, какой
+       из трёх открыт. Зелёный, потому что он в панели уже значит «работает». */
+    details[open] > summary::before { content: "▾"; color: #35c838; }
+    /* Пока один блок раскрыт, свёрнутые приглушаем: взгляд не разбегается
+       по панели (пользователь, 2026-08-23). Под мышью блок оживает,
+       иначе непонятно, можно ли по нему нажать.
+       Класс вешает popup.js. Через :has() не вышло: этот Chrome понимает
+       его в querySelector, но в правиле стиля не применяет даже с important. */
+    body.anyOpen > details:not([open]) { opacity: .4; }
+    body.anyOpen > details:not([open]):hover { opacity: 1; }
+    body > details { transition: opacity .15s ease; }
+    summary:hover { background: #24272d; }
+    body > details > summary {
+      transition: background-color .16s ease, color .16s ease, box-shadow .16s ease;
+    }
+    body > details > summary:hover {
+      box-shadow: inset 0 0 0 1px rgba(0, 195, 255, .2);
+    }
+    /* Подложка под заголовком стоит ВСЕГДА, и в свёрнутом, и в раскрытом виде
+       (пользователь, 2026-08-23). Раньше она пропадала при раскрытии, и блоки
+       переставали читаться как отдельные. */
+    hr {
+      border: none;
+      border-top: 1px solid #2c2f36;
+      margin: 12px -10px;
+    }
+    /* Разделитель внутри блока тоньше и уже наружного: он делит части одного
+       целого, а не разные блоки. Иначе панель читается как ровный список. */
+    /* Разделитель ВНУТРИ блока идёт по краю содержимого, а не по краю плашки:
+       он делит части одного блока, а не сами блоки. */
+    #heygenBox hr {
+      border-top-color: #292c33;
+      margin: 12px 0;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+    /* Главная кнопка строки тянется, вспомогательная занимает ровно себя.
+       Без явного flex:1 на первой «Обновить» разъедалась шире неё. */
+    .row > button { flex: 1 1 auto; min-width: 0; }
+    .row button.secondary {
+      background: #2c2f36;
+      color: #c8ccd2;
+      font-weight: 600;
+      flex: 0 0 40%;
+    }
+    /* Светлый текст вспомогательной кнопки перебивал общее правило для
+       неактивных, и выключенная «Обновить» выглядела ярче соседей.
+       Гасим её теми же цветами, что и все остальные. */
+    .row button.secondary:disabled {
+      background: #2c2f36;
+      color: #6b6f76;
+      cursor: not-allowed;
+    }
+    #flowBox .row button { flex: 1; padding: 9px 4px; font-size: 13px; }
+    /* Пока нажать нельзя — серые. Дальше по смыслу: начать зелёная,
+       продолжить синяя, стоп красная. */
+    #flowBox .row button[hidden] { display: none; }
+    #flowBox .row button:disabled {
+      background: #212328;
+      color: #55585f;
+      border: 1px solid #2a2d33;
+    }
+    #flowBox #flowStart:not(:disabled) { background: #2e9e4f; color: #fff; }
+    #flowBox #flowStart:not(:disabled):hover { background: #37b95d; }
+    #flowBox #flowResume:not(:disabled) { background: #00c3ff; color: #06131a; }
+    #flowBox #flowResume:not(:disabled):hover { background: #29d0ff; }
+    #flowBox #flowStop:not(:disabled) { background: #c0392b; color: #fff; }
+    #flowBox #flowStop:not(:disabled):hover { background: #e04b3a; }
+    .row button.secondary:not(:disabled):hover { background: #363a42; }
+    /* «Обновить» это помощница: серая. Синей она была, пока в панели не было
+       зелёной «Аудио». Две сочных кнопки рядом спорят за внимание. */
+    #refreshAudio:not(:disabled) { background: #2c2f36; color: #c8ccd2; font-weight: 600; }
+    #refreshAudio:not(:disabled):hover { background: #363a42; }
+
+    #flowBox textarea {
+      width: 100%;
+      height: 88px;          /* на 20 процентов ниже прежних 110 (пользователь, 2026-08-18) */
+      box-sizing: border-box;
+      background: #24262b;
+      color: #f2f2f2;
+      border: 1px solid #2c2f36;
+      border-radius: 10px;
+      padding: 8px;
+      font: 11px var(--font-apple);
+      resize: vertical;
+      margin-bottom: 8px;
+    }
+    #flowBox textarea:disabled {
+      background: #1c1e22;
+      color: #6b6f76;
+      border-color: #24262b;
+      cursor: not-allowed;
+    }
+    #flowBox .per {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #9aa0a6;
+      margin-bottom: 8px;
+    }
+    #flowBox .per select {
+      background: #24262b;
+      color: #f2f2f2;
+      border: 1px solid #2c2f36;
+      border-radius: 7px;
+      padding: 5px 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    #flowBox .per input[type="checkbox"] { accent-color: #00c3ff; }
+    #flowBox .per select:disabled {
+      background: #1c1e22;
+      color: #6b6f76;
+      border-color: #24262b;
+      cursor: not-allowed;
+    }
+    #flowBox .per:has(select:disabled) { color: #6b6f76; }
+    /* «Кадров за раз» и «Veo 3.1 lite» стоят одной строкой (пользователь, 2026-08-18) */
+    #flowBox .perRow {
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      gap: 0;
+      white-space: nowrap;
+    }
+    #flowBox .perGroup { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    #flowBox .perRow .perGap { margin-left: 0; }
+    #flowBox .perRow select { flex: 0 0 auto; }
+    #flowBox #flowPer,
+    #flowBox #flowVeo {
+      -webkit-appearance: none;
+      appearance: none;
+      padding-left: 8px;
+      padding-right: 22px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23c8ccd2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 6px center;
+      background-size: 12px 12px;
+    }
+    #flowBox #flowPer { box-sizing: border-box; width: 54px; }
+    #flowBox #flowVeo { box-sizing: border-box; width: 96px; }
+    #flowBox > summary button.mini,
+    #ytfBox > summary button.mini,
+    #toBox > summary button.mini {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: auto;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #2c2f36;
+      color: #9aa0a6;
+      border-radius: 7px;
+    }
+    #flowBox > summary button.mini:disabled,
+    #ytfBox > summary button.mini:disabled,
+    #toBox > summary button.mini:disabled {
+      background: #1c1e22;
+      color: #6b6f76;
+      cursor: not-allowed;
+    }
+    #flowBox > summary button.mini:hover:not(:disabled),
+    #ytfBox > summary button.mini:hover:not(:disabled),
+    #toBox > summary button.mini:hover:not(:disabled) { background: #3a3e46; color: #e6e8ea; }
+    /* Пока идёт подача, чистить нечего: кнопку убираем совсем (пользователь, 2026-08-20) */
+    #flowBox > summary button.mini[hidden],
+    #ytfBox > summary button.mini[hidden],
+    #toBox > summary button.mini[hidden] { display: none; }
+    /* Пока идёт подача, блок HeyGen убираем: панель занята одной работой
+       (пользователь, 2026-08-20) */
+    #heygenBox[hidden], #heygenHr[hidden] { display: none; }
+    #ytfBox[hidden], #ytfHr[hidden] { display: none; }
+    #toBox[hidden], #toHr[hidden] { display: none; }
+
+    /* Крутящаяся загрузка внутри «Стоп»: видно, что расширение в работе */
+    #flowBox #flowStop { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+    /* Правило выше задаёт display по двум id и перебивает общий скрыватель
+       «.row button[hidden]»: «Стоп» оставался виден, даже когда hidden стоял.
+       Этот селектор той же силы плюс атрибут, поэтому выигрывает. */
+    #flowBox #flowStop[hidden], #flowBox #flowStart[hidden], #flowBox #flowResume[hidden] { display: none; }
+    /* Строки настроек тоже скрываются, когда всё сгенерировано: у .per свой
+       display: flex, поэтому нужен селектор посильнее (пользователь, 2026-08-20) */
+    #flowBox .per[hidden] { display: none; }
+    /* Третий блок: фильтр выдачи YouTube по числу подписчиков */
+    #ytfBox .ytfRow, #heygenBox .ytfRow, #toBox .ytfRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #c8ccd2;
+      margin-bottom: 8px;
+    }
+    #ytfBox input[type="number"],
+    #ytfBox input[type="text"] {
+      flex: 1;
+      min-width: 0;
+      background: #24262b;
+      color: #f2f2f2;
+      border: 1px solid #2c2f36;
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    /* У .ytfRow свой display: flex, поэтому нужен парный [hidden] той же силы */
+    #ytfBox .ytfRow[hidden], #heygenBox .ytfRow[hidden], #toBox .ytfRow[hidden] { display: none; }
+    /* Переключалка RPM: две маленькие кнопки по бокам от числа */
+    #ytfBox button.step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      flex: 0 0 26px;
+      padding: 0;
+      height: 28px;
+      line-height: 1;
+      font-weight: 700;
+      background: #2c2f36;
+      color: #c8ccd2;
+      border-radius: 7px;
+    }
+    #ytfBox button.step svg { display: block; width: 14px; height: 14px; }
+    #ytfBox button.step:hover { background: #3a3e46; color: #f2f2f2; }
+    #ytfBox #ytfRpm { flex: 0 0 62px; text-align: center; }
+    /* Поле порога текстовое, а не числовое: в type="number" пробел
+       между разрядами не вводится и значение гаснет. Заодно у текстового
+       поля нет родных стрелок вверх-вниз (пользователь, 2026-08-24).
+       Поэтому правило оформления выше ловит и number, и text. */
+    /* Родные стрелочки внутри поля RPM убираем: рядом уже стоят свои кнопки
+       минус и плюс, и две пары управления в одном месте лишние
+       (пользователь, 2026-08-23). У поля «Подписчиков до» стрелки остаются,
+       там своих кнопок нет. */
+    #ytfBox #ytfRpm::-webkit-inner-spin-button,
+    #ytfBox #ytfRpm::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      appearance: none;
+      margin: 0;
+    }
+    /* тонкая черта: фильтр выдачи и доход канала это разные функции */
+    #ytfBox .ytfSep { border-top: 1px solid #2c2f36; margin: 10px 0 9px; }
+
+    #flowBox .statusRow #flowStatus[hidden] { display: none; }
+    .spin {
+      width: 12px; height: 12px; flex: 0 0 12px;
+      border: 2px solid rgba(255,255,255,.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    .spin[hidden] { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* «Посчитать» стоит справа от статуса: панель компактнее (пользователь, 2026-08-18) */
+    /* По центру, а не в растяжку: статус теперь без подложки и низкий,
+       в растяжку кнопка «Посчитать» схлопывалась вместе с ним. */
+    #flowBox .statusRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    #flowBox .statusRow #flowStatus { flex: 1; margin-bottom: 0; min-width: 0; }
+    #flowBox .statusRow #flowCount {
+      width: auto;
+      flex: 0 0 auto;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    /* «Посчитать» серая, как «Обновить» (пользователь, 2026-08-23): обе
+       вспомогательные, и синяя перетягивала внимание с главных кнопок. */
+    #flowBox #flowCount:not(:disabled) { background: #2c2f36; color: #c8ccd2; }
+    #flowBox #flowCount:not(:disabled):hover { background: #363a42; }
+    #flowBox #flowCount:disabled { background: #2c2f36; color: #6b6f76; cursor: not-allowed; }
+    /* Идёт подача — считать нечего, кнопку убираем (пользователь, 2026-08-20) */
+    #flowBox .statusRow #flowCount[hidden] { display: none; }
+    /* Кнопки стоят ПОД цифрой, отдельной строкой: в углах плитки они
+       налезали на счётчик и его было не разобрать. */
+    #tally .btns {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    #tally .btns button {
+      width: 22px;
+      height: 20px;
+      padding: 0;
+      line-height: 20px;
+      font-size: 11px;
+      border-radius: 6px;
+      border: 0;
+      cursor: pointer;
+    }
+    #tally .copy { background: #2c2f36; color: #9aa0a6; }
+    #tally .copy:hover { background: #3a3e46; color: #f2f2f2; }
+    /* Дослать недостающие кадры прямо из плитки. Появляется только при недостаче,
+       то есть всегда под красной цифрой. Зелёной была раньше, но зелёный в панели
+       означает «всё найдено, можно качать», и под красным счётчиком он спорил с ним
+       (пользователь, 2026-08-24). Взят основной синий кнопок, новых цветов не вводим. */
+    #tally .go { background: #00c3ff; color: #06131a; font-size: 10px; }
+    #tally .go:hover { background: #29d0ff; }
+    #tally .go:disabled { background: #2c2f36; color: #6b6f76; cursor: not-allowed; }
+    #tally {
+      display: none;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    #tally.show { display: flex; }
+    #tally .cell {
+      flex: 1;
+      box-sizing: border-box;
+      background: #1c1e22;
+      border: 1px solid var(--studio-border);
+      border-radius: 10px;
+      padding: 8px 6px;
+      text-align: center;
+      line-height: 1.25;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #tally .big { font-size: 19px; font-weight: 700; white-space: nowrap; }
+    #tally .cap { font-size: 10px; color: #9aa0a6; }
+    #tally .ok  { color: #35c838; }
+    #tally .no  { color: #ff6b6b; }
+    #flowLogBox { margin-top: 8px; }
+    #flowLogBox summary {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 9px;
+      background: #1c1e22;
+      color: #9aa0a6;
+    }
+    /* Своя полоса прокрутки: системная светлая и режет глаз на тёмном фоне */
+    #flowLog::-webkit-scrollbar, #flowBox textarea::-webkit-scrollbar { width: 8px; }
+    #flowLog::-webkit-scrollbar-track,
+    #flowBox textarea::-webkit-scrollbar-track { background: transparent; }
+    #flowLog::-webkit-scrollbar-thumb,
+    #flowBox textarea::-webkit-scrollbar-thumb {
+      background: #33363c;
+      border-radius: 5px;
+    }
+    #flowLog::-webkit-scrollbar-thumb:hover,
+    #flowBox textarea::-webkit-scrollbar-thumb:hover { background: #3f434b; }
+    /* Журнал свёрнут и не должен спорить с блоками выше: мельче и тусклее */
+    #flowLogBox > summary.logSum {
+      font-size: 11px;
+      font-weight: 500;
+      color: #6b6f76;
+      padding: 5px 8px;
+      margin: 0;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #flowLogBox > summary.logSum:hover { color: #9aa0a6; background: #1c1e22; }
+    #flowLog {
+      font: 11px var(--font-apple);
+      color: #6b6f76;
+      max-height: 96px;
+      overflow-y: auto;
+      margin-top: 8px;
+      white-space: pre-wrap;
+      line-height: 1.45;
+    }
+    /* Палитра YouTube Studio: нейтральный чёрно-графитовый интерфейс,
+       голубой используется как акцент данных и активных элементов. */
+    body { background: var(--studio-bg); color: var(--studio-text); }
+    button:not(:disabled) { background: var(--studio-blue); color: #101010; }
+    button:not(:disabled):hover { background: var(--studio-blue-hover); }
+    button:disabled { background: var(--studio-control); color: #717171; }
+    #heygenBox #dl:disabled,
+    #heygenBox #dlAudio:disabled,
+    #heygenBox #refreshAudio:disabled {
+      background: #303030;
+      color: #a0a0a0;
+      border: 1px solid #3a3a3a;
+      cursor: not-allowed;
+    }
+    #flowBox .row button:disabled {
+      background: #303030;
+      color: #929292;
+      border-color: #3a3a3a;
+    }
+    #flowBox textarea:disabled {
+      background: #1b1b1b;
+      color: #929292;
+      border-color: #383838;
+    }
+    #flowBox textarea:disabled::placeholder { color: #858585; opacity: 1; }
+    #flowBox .per select:disabled,
+    #flowBox .per:has(select:disabled) { color: #858585; }
+    button:focus-visible, summary:focus-visible { outline-color: var(--studio-blue); }
+    input:not([type="checkbox"]):focus,
+    select:focus,
+    textarea:focus { outline: none; box-shadow: none; }
+    #flowBar { background: var(--studio-control); }
+    #flowBar > i { background: var(--studio-blue); }
+    #flowBox .per input[type="checkbox"] { accent-color: var(--studio-blue); }
+    summary { background: var(--studio-surface); color: #d8d8d8; }
+    summary:hover { background: var(--studio-surface-raised); }
+    details[open] > summary::before { color: var(--studio-blue); }
+    body > details > summary:hover { box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .24); }
+    hr { border-top-color: #303030; }
+    #heygenBox hr { border-top-color: #292929; }
+    .row button.secondary,
+    #refreshAudio:not(:disabled),
+    #flowBox > summary button.mini:not(:disabled),
+    #ytfBox > summary button.mini:not(:disabled),
+    #toBox > summary button.mini:not(:disabled),
+    #flowBox #flowCount:not(:disabled) {
+      background: var(--studio-control);
+      color: #d0d0d0;
+    }
+    .row button.secondary:not(:disabled):hover,
+    #refreshAudio:not(:disabled):hover,
+    #flowBox > summary button.mini:hover:not(:disabled),
+    #ytfBox > summary button.mini:hover:not(:disabled),
+    #toBox > summary button.mini:hover:not(:disabled),
+    #flowBox #flowCount:not(:disabled):hover { background: var(--studio-hover); }
+    #flowBox textarea,
+    #flowBox .per select,
+    #ytfBox input[type="number"],
+    #ytfBox input[type="text"],
+    #toBox input[type="text"],
+    #toBox input[type="time"],
+    #toBox .toItem.toEditing .toEditInput,
+    #toBox .toEditInput {
+      background: #1b1b1b;
+      color: var(--studio-text);
+      border-color: var(--studio-border);
+    }
+    #toBox .toItem,
+    #toBox .toChip,
+    #toBox .toAudioSample { background: #181818; }
+    #tally .cell { background: #181818; }
+    #toBox .toItem.toDragPreview {
+      border-color: rgba(62, 166, 255, .55);
+      background: #20252b;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .32), 0 0 0 1px rgba(62, 166, 255, .14);
+    }
+    #toBox .toDropIndicator { background: var(--studio-blue); box-shadow: 0 0 7px rgba(62, 166, 255, .4); }
+    #toBox .toItem.toReorderable.toDragging {
+      border-color: rgba(62, 166, 255, .26);
+      background: rgba(32, 37, 43, .46);
+    }
+    #toBox .toItem .toDragHandle,
+    #toBox .toItem .toUrl,
+    #toBox .toItem .toAudioSample,
+    #toBox .toChip { color: var(--studio-muted); }
+    #toBox .toItem .toDragHandle:hover,
+    #toBox .toItem.toDragging .toDragHandle { color: var(--studio-blue); }
+    #toBox .toItem .toTime,
+    #toBox .toItem .toName,
+    #toBox .toChipTag { color: var(--studio-blue); }
+    #toBox .toItem .toName,
+    #toBox .toChipTag { background: rgba(62, 166, 255, .16); }
+    #toBox .toItem .toAttachSelect,
+    #toBox .toItem.toEditing .toEditInput,
+    #toBox .toEditInput { border-color: var(--studio-border); }
+    #toBox .toItem .toAttach.on {
+      background: rgba(62, 166, 255, .18);
+      color: var(--studio-blue);
+    }
+    #toBox .toItem .toAttach.on:hover { background: rgba(62, 166, 255, .28); }
+    #toBox #toAudioPreview > summary,
+    #toBox #toLinksDetails > summary { background: #181818; color: #a0a0a0; }
+    #toBox #toAudioPreview > summary:hover,
+    #toBox #toLinksDetails > summary:hover {
+      background: var(--studio-surface-raised);
+      color: var(--studio-text);
+      box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .24);
+    }
+    #toBox #toAudioPreview > summary:focus-visible,
+    #toBox #toLinksDetails > summary:focus-visible { outline-offset: -2px; }
+    #toBox .toAudioPlay,
+    #toBox .toAudioListen,
+    #toBox .toAudioDelete { background: var(--studio-control); }
+    #toBox .toAudioPlay:hover,
+    #toBox .toAudioListen:hover { background: var(--studio-hover); }
+    #toBox .toAudioListen.is-playing {
+      background: rgba(62, 166, 255, .18);
+      color: var(--studio-blue);
+    }
+    #toBox .toAudioListen.is-playing:hover { background: rgba(62, 166, 255, .28); }
+    #toBox .toScanDots .toScanDot { background: #303030; }
+    #toBox .toScanDots .toScanDot.done { background: #777; }
+    #toBox .toScanDots .toScanDot.found {
+      background: #ffd34e;
+      box-shadow: 0 0 3px rgba(255, 211, 78, .8), 0 0 8px rgba(255, 211, 78, .42);
+    }
+    #flowBox #flowResume:not(:disabled), #tally .go:not(:disabled) {
+      background: var(--studio-blue);
+      color: #101010;
+    }
+    #flowBox #flowResume:not(:disabled):hover, #tally .go:not(:disabled):hover { background: var(--studio-blue-hover); }
+    #flowLog::-webkit-scrollbar-thumb,
+    #flowBox textarea::-webkit-scrollbar-thumb { background: #3a3a3a; }
+    #flowLog::-webkit-scrollbar-thumb:hover,
+    #flowBox textarea::-webkit-scrollbar-thumb:hover { background: #505050; }
+    /* Четыре главных функции оформлены отдельными карточками, как блоки
+       статистики в YouTube Studio: заголовок и содержимое связаны рамкой. */
+    body > details {
+      box-sizing: border-box;
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      border: 1px solid #303030;
+      border-radius: 14px;
+      background: #181818;
+      transition: opacity .15s ease, border-color .16s ease, background-color .16s ease;
+    }
+    body > details[open] { margin-bottom: 10px; }
+    body > details:last-of-type { margin-bottom: 0; }
+    body > details:hover { border-color: #454545; }
+    body > details > summary {
+      margin: -8px -10px;
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: transparent;
+      box-shadow: none;
+    }
+    body > details[open] > summary {
+      margin: -8px -10px 8px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid #303030;
+      border-radius: 12px 12px 0 0;
+    }
+    #heygenBox[open] { padding-bottom: 12px; }
+    #heygenBox[open] > summary { margin-bottom: 12px; }
+    body > details > summary:hover {
+      background: #212121;
+      box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .2);
+    }
+    #heygenHr, #ytfHr, #toHr { display: none; }
+    #ytfBox > .ytfRow + .ytfRow { margin-top: 8px; }
+    #ytfBox > label.ytfRow:last-of-type { margin-bottom: 0; }
+    #ytfBox .ytfRow > .sw { top: 1px; }
+  </style>
+</head>
+<body>
+  <details id="heygenBox">
+  <summary>🎬 &nbsp;HeyGen · видео и аудио</summary>
+
+  <div id="info" class="info"></div>
+  <button id="dl" disabled>Проверяю страницу…</button>
+
+  <hr />
+
+  <div id="audioInfo" class="info"></div>
+  <div class="row">
+    <button id="dlAudio" disabled>Ищу аудио…</button>
+    <button id="refreshAudio" class="secondary"><svg class="ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01"/><polyline points="20.5 3.5 20.5 9 15 9"/></svg>Обновить</button>
+  </div>
+  </details>
+
+
+  <hr id="heygenHr" />
+
+  <details id="ytfBox">
+    <summary>🎛 &nbsp;YouTube менеджер</summary>
+    <label class="ytfRow">
+      <span>Прятать большие каналы</span>
+      <span class="sw"><input type="checkbox" id="ytfOn" /><i></i></span>
+    </label>
+    <div class="ytfRow" id="ytfLimitRow" hidden>
+      <span>Подписчиков до:</span>
+      <input type="text" inputmode="numeric" id="ytfLimit" maxlength="8" placeholder="15 000" />
+    </div>
+
+    <div class="ytfSep"></div>
+
+    <label class="ytfRow">
+      <span>Показать доход</span>
+      <span class="sw"><input type="checkbox" id="ytmOn" /><i></i></span>
+    </label>
+    <div class="ytfRow" id="ytfRpmRow" hidden>
+      <span>RPM, $</span>
+      <button id="ytfRpmDown" class="step" type="button" title="Уменьшить RPM" aria-label="Уменьшить RPM"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <input type="number" id="ytfRpm" min="0" max="50" step="0.5" value="2" />
+      <button id="ytfRpmUp" class="step" type="button" title="Увеличить RPM" aria-label="Увеличить RPM"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button>
+    </div>
+  </details>
+
+  <hr id="ytfHr" />
+
+  <details id="flowBox">
+    <summary>🌊 &nbsp;Flow автоподача <button id="flowClear" class="mini"><svg class="ic" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 4h4"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>Очистить</button></summary>
+    <div class="statusRow">
+      <div id="flowStatus" class="status wait">Откройте Google Flow</div>
+      <button id="flowCount" class="secondary"><svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>Посчитать</button>
+    </div>
+    <div id="flowBar"><i></i></div>
+    <textarea id="flowText" placeholder="вставьте сюда раскадровку целиком"></textarea>
+    <div class="per perRow">
+      <div class="perGroup">
+        <span>Кадров за раз:</span>
+        <select id="flowPer">
+          <option>2</option><option selected>5</option><option>8</option>
+          <option>10</option><option>12</option>
+        </select>
+      </div>
+      <div class="perGroup">
+        <span class="perGap">Veo 3.1 lite</span>
+        <select id="flowVeo">
+          <option value="pause" selected>в конце</option>
+          <option value="skip">пропускать</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <button id="flowStart" disabled>Начать</button>
+      <button id="flowResume" class="secondary" disabled>Продолжить</button>
+      <button id="flowStop" class="secondary" disabled><span id="flowSpin" class="spin" hidden></span>Стоп</button>
+    </div>
+    <div id="tally"></div>
+
+    <details id="flowLogBox">
+      <summary class="logSum">Журнал</summary>
+      <div id="flowLog"></div>
+    </details>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>

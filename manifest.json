@@ -1,0 +1,85 @@
+{
+  "manifest_version": 3,
+  "name": "Multi Bot",
+  "version": "2.86",
+  "description": "Multi Bot: HeyGen, Google Flow, YouTube, Google Classroom.",
+  "permissions": [
+    "scripting",
+    "downloads",
+    "tabs",
+    "debugger",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*.amazonaws.com/*",
+    "*://*.heygen.ai/*",
+    "*://*.heygen.com/*",
+    "*://www.youtube.com/*",
+    "https://labs.google/*",
+    "https://flow.google.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "flow.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Multi Bot",
+    "default_icon": {
+      "16": "icons/multibot-list-16.png",
+      "32": "icons/multibot-list-32.png",
+      "48": "icons/multibot-list-48.png",
+      "128": "icons/multibot-list-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/multibot-list-16.png",
+    "32": "icons/multibot-list-32.png",
+    "48": "icons/multibot-list-48.png",
+    "128": "icons/multibot-list-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://studio.youtube.com/*"
+      ],
+      "js": [
+        "yt-studio-average.js",
+        "yt-studio-summary.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/*"
+      ],
+      "js": [
+        "yt-filter.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://classroom.google.com/*"
+      ],
+      "js": [
+        "classroom-filter.js"
+      ],
+      "css": [
+        "classroom-filter.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://app.heygen.com/*"
+      ],
+      "js": [
+        "heygen-audio-core.js",
+        "heygen-audio-inline.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
