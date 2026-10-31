@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const {percentage,count,average,likesMetric,contentMetrics,context}=require('../yt-studio-summary.js');
+const {percentage,count,average,likesMetric,sharesMetric,contentMetrics,context}=require('../yt-studio-summary.js');
 const {cleanMetrics,validate}=require('../yt-studio-summary-worker.js');
 const channel='UC87K7-Uo17LpO5v3VWaO9iw';
 const url=`https://studio.youtube.com/channel/${channel}/analytics/tab-content/period-default/explore?dimension=VIDEO&t_metrics=EXTERNAL_VIEWS&t_metrics=RATINGS_LIKES`;
@@ -19,6 +19,15 @@ test('likes are percentages of views, averaged per video; totals and zero-view v
   assert.equal(likesMetric(report([['A','100','0']]),url).value,0);
   assert.equal(likesMetric(report([['A','0','10']]),url),null);
   assert.equal(likesMetric(report([['A','100','100']]),url.replace('RATINGS_LIKES','POST_LIKES')),null);
+});
+test('shares are averaged per video, preserve zero and can exceed views',()=>{
+  const sharesUrl=url.replace('RATINGS_LIKES','SHARINGS');
+  const result=sharesMetric(report([['Итого','110','30'],['A','100','10'],['B','10','0'],['C','0','1'],['D','10','—']]),sharesUrl);
+  assert.equal(result.value,5);assert.equal(result.count,2);
+  assert.equal(sharesMetric(report([['A','1','2']]),sharesUrl).value,200);
+  assert.equal(sharesMetric(report([['A','1','0']]),sharesUrl).value,0);
+  assert.equal(sharesMetric(report([['A','0','0']]),sharesUrl),null);
+  assert.equal(sharesMetric(report([['A','10','1']]),url),null);
 });
 test('exact count parsing preserves zero, rejects rounded counts and unknown values',()=>{
   assert.equal(count('5\u00a0385'),5385);assert.equal(count('0'),0);
@@ -48,8 +57,22 @@ test('cache context is isolated by channel and date range, and rejects mismatche
   assert.equal(context(page(other),content),null);
   assert.equal(context(page(),url),null);
   assert.deepEqual(new URL(a.likesUrl).searchParams.getAll('t_metrics'),['EXTERNAL_VIEWS','RATINGS_LIKES']);
+  assert.deepEqual(new URL(a.sharesUrl).searchParams.getAll('t_metrics'),['EXTERNAL_VIEWS','SHARINGS']);
   assert(validate(a,content));assert(!validate(a,content.replace(channel,other)));
   assert(!validate({...a,likesUrl:'https://example.com/steal'},content));
+});
+test('shares update runs only on its button and uses the same background focus lifecycle',async()=>{
+  const {call,ctx,created,closed,local,commands}=worker();
+  await call({type:'mbStudioSummaryGet',context:ctx});
+  assert.equal(created.length,0);
+  await call({type:'mbStudioSummaryRefreshShares',context:ctx});
+  await new Promise(setImmediate);
+  assert.equal(created.length,1);assert.equal(created[0].url,ctx.sharesUrl);assert.equal(created[0].active,false);
+  const probe=await call({type:'mbStudioSummaryProbe'},701,ctx.sharesUrl);
+  assert.equal(probe.collector.mode,'shares');assert.equal(commands[0].params.enabled,true);
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:ctx.range,metrics:{shares:{value:3.14,count:3},likes:{value:10,count:1}}},701,ctx.sharesUrl);
+  assert.equal(local[ctx.key].metrics.shares.value,3.14);assert.equal(local[ctx.key].metrics.likes,undefined);
+  assert.equal(local[ctx.key].loading,false);assert.deepEqual(closed,[701]);assert.equal(commands.at(-1).params.enabled,false);
 });
 test('storage accepts a measured zero and rejects unavailable values',()=>{
   const now=Date.now(), valid={value:0,count:1,source:'Studio'};

@@ -2,6 +2,8 @@ importScripts("heygen-audio-background.js", "yt-studio-summary-worker.js");
 // ── Автоподача раскадровки в чат Google Flow ─────────────────────────────
 // Цикл живёт в service worker, потому что попап закрывается.
 // Печать идёт через chrome.debugger: Flow принимает только доверенный ввод.
+
+// Уходит первым абзацем самого первого сообщения. Правится здесь.
 const HEAD = `Генерируй картинки. Если картинка вышла с ошибкой, перефразируй её промт
 и сгенерируй заново. После генерации переименуй картинки числом кадра`;
 
@@ -1107,6 +1109,7 @@ setInterval(pollJob, 4000);
 chrome.runtime.onMessage.addListener((msg, _s, reply) => {
   (async () => {
     if (msg.cmd === "ping") reply({ ok: true });
+
     if (msg.cmd === "flowStart") {
       // only приходит после «Посчитать»: гоним только недостающие кадры,
       // а счётчик ведём по всему ролику, чтобы цифра не падала обратно к нулю
@@ -1293,6 +1296,9 @@ chrome.storage.onChanged.addListener(async (ch) => {
   try { for (const t of await chrome.tabs.query({ url: "*://*.youtube.com/*" })) paintTab(t); } catch (e) {}
 });
 
+// Тихие обёртки над chrome.tabs: вкладка может закрыться между нашими
+// обращениями, а Chrome печатает «Unchecked runtime.lastError», даже
+// когда промис пойман. Гасится только чтением lastError в колбэке.
 function toTabGetQuiet(id) {
   return new Promise((resolve) => {
     chrome.tabs.get(id, (tab) => {

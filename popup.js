@@ -1123,6 +1123,18 @@ ytmOnEl.addEventListener("change", () => {
   chrome.storage.local.set({ ytmOn: on });
 });
 
+// «Аналитика канала» включает и выключает табличку средних показателей
+// рядом с заголовком «Аналитика по каналу» в YouTube Studio
+// (yt-studio-summary.js). По умолчанию включено, как и было до появления
+// переключателя.
+const ytsOnEl = document.getElementById("ytsOn");
+chrome.storage.local.get(["ytsOn"], (r) => {
+  ytsOnEl.checked = (r || {}).ytsOn !== false;
+});
+ytsOnEl.addEventListener("change", () => {
+  chrome.storage.local.set({ ytsOn: ytsOnEl.checked });
+});
+
 
 // ── RPM и доход ──────────────────────────────────────────────────────────
 // Доход считается как просмотры за месяц, делённые на тысячу и умноженные
@@ -1158,3 +1170,5 @@ function markOpen() {
 }
 topBoxes().forEach((d) => d.addEventListener("toggle", markOpen));
 
+
+markOpen();

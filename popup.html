@@ -349,8 +349,7 @@
     #flowBox #flowPer { box-sizing: border-box; width: 54px; }
     #flowBox #flowVeo { box-sizing: border-box; width: 96px; }
     #flowBox > summary button.mini,
-    #ytfBox > summary button.mini,
-    #toBox > summary button.mini {
+    #ytfBox > summary button.mini {
       margin-left: auto;
       display: inline-flex;
       align-items: center;
@@ -364,24 +363,20 @@
       border-radius: 7px;
     }
     #flowBox > summary button.mini:disabled,
-    #ytfBox > summary button.mini:disabled,
-    #toBox > summary button.mini:disabled {
+    #ytfBox > summary button.mini:disabled {
       background: #1c1e22;
       color: #6b6f76;
       cursor: not-allowed;
     }
     #flowBox > summary button.mini:hover:not(:disabled),
-    #ytfBox > summary button.mini:hover:not(:disabled),
-    #toBox > summary button.mini:hover:not(:disabled) { background: #3a3e46; color: #e6e8ea; }
+    #ytfBox > summary button.mini:hover:not(:disabled) { background: #3a3e46; color: #e6e8ea; }
     /* Пока идёт подача, чистить нечего: кнопку убираем совсем (пользователь, 2026-08-20) */
     #flowBox > summary button.mini[hidden],
-    #ytfBox > summary button.mini[hidden],
-    #toBox > summary button.mini[hidden] { display: none; }
+    #ytfBox > summary button.mini[hidden] { display: none; }
     /* Пока идёт подача, блок HeyGen убираем: панель занята одной работой
        (пользователь, 2026-08-20) */
     #heygenBox[hidden], #heygenHr[hidden] { display: none; }
     #ytfBox[hidden], #ytfHr[hidden] { display: none; }
-    #toBox[hidden], #toHr[hidden] { display: none; }
 
     /* Крутящаяся загрузка внутри «Стоп»: видно, что расширение в работе */
     #flowBox #flowStop { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
@@ -393,7 +388,7 @@
        display: flex, поэтому нужен селектор посильнее (пользователь, 2026-08-20) */
     #flowBox .per[hidden] { display: none; }
     /* Третий блок: фильтр выдачи YouTube по числу подписчиков */
-    #ytfBox .ytfRow, #heygenBox .ytfRow, #toBox .ytfRow {
+    #ytfBox .ytfRow, #heygenBox .ytfRow {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -413,7 +408,7 @@
       font-size: 12px;
     }
     /* У .ytfRow свой display: flex, поэтому нужен парный [hidden] той же силы */
-    #ytfBox .ytfRow[hidden], #heygenBox .ytfRow[hidden], #toBox .ytfRow[hidden] { display: none; }
+    #ytfBox .ytfRow[hidden], #heygenBox .ytfRow[hidden] { display: none; }
     /* Переключалка RPM: две маленькие кнопки по бокам от числа */
     #ytfBox button.step {
       display: inline-flex;
@@ -619,7 +614,6 @@
     #refreshAudio:not(:disabled),
     #flowBox > summary button.mini:not(:disabled),
     #ytfBox > summary button.mini:not(:disabled),
-    #toBox > summary button.mini:not(:disabled),
     #flowBox #flowCount:not(:disabled) {
       background: var(--studio-control);
       color: #d0d0d0;
@@ -628,79 +622,18 @@
     #refreshAudio:not(:disabled):hover,
     #flowBox > summary button.mini:hover:not(:disabled),
     #ytfBox > summary button.mini:hover:not(:disabled),
-    #toBox > summary button.mini:hover:not(:disabled),
     #flowBox #flowCount:not(:disabled):hover { background: var(--studio-hover); }
     #flowBox textarea,
     #flowBox .per select,
     #ytfBox input[type="number"],
-    #ytfBox input[type="text"],
-    #toBox input[type="text"],
-    #toBox input[type="time"],
-    #toBox .toItem.toEditing .toEditInput,
-    #toBox .toEditInput {
+    #ytfBox input[type="text"] {
       background: #1b1b1b;
       color: var(--studio-text);
       border-color: var(--studio-border);
     }
-    #toBox .toItem,
-    #toBox .toChip,
-    #toBox .toAudioSample { background: #181818; }
+
     #tally .cell { background: #181818; }
-    #toBox .toItem.toDragPreview {
-      border-color: rgba(62, 166, 255, .55);
-      background: #20252b;
-      box-shadow: 0 12px 28px rgba(0, 0, 0, .32), 0 0 0 1px rgba(62, 166, 255, .14);
-    }
-    #toBox .toDropIndicator { background: var(--studio-blue); box-shadow: 0 0 7px rgba(62, 166, 255, .4); }
-    #toBox .toItem.toReorderable.toDragging {
-      border-color: rgba(62, 166, 255, .26);
-      background: rgba(32, 37, 43, .46);
-    }
-    #toBox .toItem .toDragHandle,
-    #toBox .toItem .toUrl,
-    #toBox .toItem .toAudioSample,
-    #toBox .toChip { color: var(--studio-muted); }
-    #toBox .toItem .toDragHandle:hover,
-    #toBox .toItem.toDragging .toDragHandle { color: var(--studio-blue); }
-    #toBox .toItem .toTime,
-    #toBox .toItem .toName,
-    #toBox .toChipTag { color: var(--studio-blue); }
-    #toBox .toItem .toName,
-    #toBox .toChipTag { background: rgba(62, 166, 255, .16); }
-    #toBox .toItem .toAttachSelect,
-    #toBox .toItem.toEditing .toEditInput,
-    #toBox .toEditInput { border-color: var(--studio-border); }
-    #toBox .toItem .toAttach.on {
-      background: rgba(62, 166, 255, .18);
-      color: var(--studio-blue);
-    }
-    #toBox .toItem .toAttach.on:hover { background: rgba(62, 166, 255, .28); }
-    #toBox #toAudioPreview > summary,
-    #toBox #toLinksDetails > summary { background: #181818; color: #a0a0a0; }
-    #toBox #toAudioPreview > summary:hover,
-    #toBox #toLinksDetails > summary:hover {
-      background: var(--studio-surface-raised);
-      color: var(--studio-text);
-      box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .24);
-    }
-    #toBox #toAudioPreview > summary:focus-visible,
-    #toBox #toLinksDetails > summary:focus-visible { outline-offset: -2px; }
-    #toBox .toAudioPlay,
-    #toBox .toAudioListen,
-    #toBox .toAudioDelete { background: var(--studio-control); }
-    #toBox .toAudioPlay:hover,
-    #toBox .toAudioListen:hover { background: var(--studio-hover); }
-    #toBox .toAudioListen.is-playing {
-      background: rgba(62, 166, 255, .18);
-      color: var(--studio-blue);
-    }
-    #toBox .toAudioListen.is-playing:hover { background: rgba(62, 166, 255, .28); }
-    #toBox .toScanDots .toScanDot { background: #303030; }
-    #toBox .toScanDots .toScanDot.done { background: #777; }
-    #toBox .toScanDots .toScanDot.found {
-      background: #ffd34e;
-      box-shadow: 0 0 3px rgba(255, 211, 78, .8), 0 0 8px rgba(255, 211, 78, .42);
-    }
+
     #flowBox #flowResume:not(:disabled), #tally .go:not(:disabled) {
       background: var(--studio-blue);
       color: #101010;
@@ -743,7 +676,7 @@
       background: #212121;
       box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .2);
     }
-    #heygenHr, #ytfHr, #toHr { display: none; }
+    #heygenHr, #ytfHr { display: none; }
     #ytfBox > .ytfRow + .ytfRow { margin-top: 8px; }
     #ytfBox > label.ytfRow:last-of-type { margin-bottom: 0; }
     #ytfBox .ytfRow > .sw { top: 1px; }
@@ -770,6 +703,13 @@
 
   <details id="ytfBox">
     <summary>🎛 &nbsp;YouTube менеджер</summary>
+    <label class="ytfRow">
+      <span>Аналитика канала</span>
+      <span class="sw"><input type="checkbox" id="ytsOn" /><i></i></span>
+    </label>
+
+    <div class="ytfSep"></div>
+
     <label class="ytfRow">
       <span>Прятать большие каналы</span>
       <span class="sw"><input type="checkbox" id="ytfOn" /><i></i></span>

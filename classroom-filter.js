@@ -361,5 +361,4 @@
     let href = location.href;
     setInterval(() => { if (location.href !== href) { href = location.href; schedule(); } }, 800);
   });
-
 })();

@@ -1,9 +1,9 @@
 // A compact channel header table. Every value comes from rendered Studio reports.
 (() => {
   const ROOT = 'data-multibot-channel-summary';
-  const NAMES = ['ctr', 'duration', 'retention', 'likes'];
-  const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.'];
-  const FULL_LABELS = ['Средний CTR', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам'];
+  const NAMES = ['ctr', 'duration', 'retention', 'likes', 'shares'];
+  const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.', 'Поделились/просм.'];
+  const FULL_LABELS = ['Средний CTR', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам'];
   const text = e => (e?.textContent || '').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
   const visible = e => e && !e.closest('[hidden], [aria-hidden="true"]') && e.getClientRects().length > 0;
   function percentage(value) {
@@ -48,9 +48,9 @@
     }
     return metrics;
   }
-  function likesMetric(doc, rawUrl) {
+  function ratioMetric(doc, rawUrl, metricName) {
     const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics');
-    const vi = columns.indexOf('EXTERNAL_VIEWS'), li = columns.indexOf('RATINGS_LIKES');
+    const vi = columns.indexOf('EXTERNAL_VIEWS'), li = columns.indexOf(metricName);
     if (vi < 0 || li < 0 || u.searchParams.get('dimension') !== 'VIDEO') return null;
     const root = doc.querySelector('#debug-explore-table');
     if (!root || !visible(root)) return null;
@@ -61,15 +61,18 @@
       const cells = [...row.querySelectorAll('.debug-metric-value')];
       if (cells.length !== columns.length) continue;
       const views = count(text(cells[vi])), likes = count(text(cells[li]));
-      if (views > 0 && likes !== null && likes <= views) values.push(likes / views * 100);
+      if (views > 0 && likes !== null && (metricName !== 'RATINGS_LIKES' || likes <= views)) values.push(likes / views * 100);
     }
     const result = average(values);
-    return result ? { ...result, source: `Среднее (лайки ÷ просмотры × 100%) по ${result.count} роликам отчёта за выбранный период. Ролики без просмотров исключены.` } : null;
+    const label = metricName === 'SHARINGS' ? 'число публикаций через «Поделиться»' : 'лайки';
+    return result ? { ...result, source: `Среднее (${label} ÷ просмотры × 100%) по ${result.count} роликам отчёта за выбранный период. Ролики без просмотров исключены.` } : null;
   }
+  const likesMetric = (doc, url) => ratioMetric(doc, url, 'RATINGS_LIKES');
+  const sharesMetric = (doc, url) => ratioMetric(doc, url, 'SHARINGS');
   function readMetrics(doc, rawUrl, mode) {
     if (mode === 'content') return contentMetrics(doc);
-    const value = mode === 'likes' ? likesMetric(doc, rawUrl) : durationMetric(doc);
-    return value ? { [mode === 'likes' ? 'likes' : 'duration']: value } : {};
+    const value = mode === 'likes' ? likesMetric(doc, rawUrl) : mode === 'shares' ? sharesMetric(doc, rawUrl) : durationMetric(doc);
+    return value ? { [['likes', 'shares'].includes(mode) ? mode : 'duration']: value } : {};
   }
   function dateRange(doc) {
     const picker = [...doc.querySelectorAll('yta-time-picker')].filter(visible).at(-1);
@@ -100,11 +103,15 @@
     likes.searchParams.set('dimension', 'VIDEO');
     likes.searchParams.set('metric', 'EXTERNAL_VIEWS');
     likes.searchParams.set('o_column', 'EXTERNAL_VIEWS');
+    const shares = new URL(likes);
+    shares.searchParams.delete('t_metrics');
+    shares.searchParams.append('t_metrics', 'EXTERNAL_VIEWS');
+    shares.searchParams.append('t_metrics', 'SHARINGS');
     const period = new URL(likes); period.searchParams.delete('t_metrics');
     period.searchParams.delete('metric'); period.searchParams.delete('o_column');
     period.pathname = period.pathname.replace(/\/tab-[^/]+\//, '/tab-overview/');
     return { channelId, range, key: `mbStudioSummary:${channelId}:${hash(range + '|' + period.href)}`,
-      overviewUrl: overview.href, contentUrl: content.href, likesUrl: likes.href };
+      overviewUrl: overview.href, contentUrl: content.href, likesUrl: likes.href, sharesUrl: shares.href };
   }
   function render(doc, ctx, record, onRefreshLikes) {
     const heading = [...doc.querySelectorAll('h1')].find(e => visible(e) && /аналитика по каналу|аналітика каналу|channel analytics/i.test(text(e)));
@@ -127,10 +134,10 @@
     const formatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     for (const name of NAMES) {
       const cell = table.querySelector(`[data-metric="${name}"]`), saved = record?.metrics?.[name];
-      const metric = saved && Date.now() >= saved.at && (name === 'likes' || Date.now() - saved.at < 15 * 60000) ? saved : null;
-      const value = metric && Number.isFinite(metric.value) ? formatter.format(metric.value) + '%' : '-';
+      const metric = saved && Date.now() >= saved.at && (['likes', 'shares'].includes(name) || Date.now() - saved.at < 15 * 60000) ? saved : null;
+      const value = metric && Number.isFinite(metric.value) ? (name === 'shares' ? new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(metric.value) : formatter.format(metric.value)) + '%' : '-';
       const title = metric ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}` : 'Откройте соответствующую вкладку аналитики для чтения показателя.';
-      if (name === 'likes') {
+      if (['likes', 'shares'].includes(name)) {
         let button = cell.querySelector('button');
         if (!button) {
           button = doc.createElement('button'); button.type = 'button'; button.setAttribute('data-refresh-likes', '');
@@ -141,9 +148,10 @@
         const label = button.querySelector('[data-likes-value]'), labelText = metric ? value : 'Обновить';
         if (label.textContent !== labelText) label.textContent = labelText;
         button.disabled = !!record?.loading;
-        button.setAttribute('aria-label', record?.loading ? 'Обновление лайков к просмотрам' : 'Обновить лайки к просмотрам');
+        const labelName = name === 'shares' ? 'публикации к просмотрам' : 'лайки к просмотрам';
+        button.setAttribute('aria-label', record?.loading ? `Обновление: ${labelName}` : `Обновить ${labelName}`);
         button.title = record?.loading ? 'Загружаем отчёт этого канала.' : `${metric ? title + '\n' : ''}${record?.error ? record.error + '\n' : ''}Обновить из отчёта текущего канала.`;
-        button.onclick = () => onRefreshLikes?.(ctx);
+        button.onclick = () => onRefreshLikes?.(ctx, name);
         continue;
       }
       if (cell.textContent !== value) cell.textContent = value;
@@ -151,11 +159,18 @@
     }
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { percentage, count, average, durationMetric, contentMetrics, likesMetric, readMetrics, context, dateRange, render };
+    module.exports = { percentage, count, average, durationMetric, contentMetrics, likesMetric, sharesMetric, readMetrics, context, dateRange, render };
     return;
   }
   globalThis.__mbStudioSummaryCleanup?.();
   let timer, collectorTimer, refreshTimer, current = null, record = null, lastRequest = '', lastRequestAt = 0, lastKey = '', keySince = 0;
+  // Переключатель «Аналитика канала» в попапе (ключ ytsOn, по умолчанию
+  // включён). Выключен — таблички нет и запросов в фон за данными тоже нет.
+  let enabled = true;
+  function hide() {
+    document.querySelector(`[${ROOT}]`)?.remove();
+    current = null; record = null; lastKey = ''; lastRequest = '';
+  }
   const send = message => chrome.runtime.sendMessage(message);
   const style = document.createElement('style');
   style.textContent = `#page-title-container:has(>[${ROOT}]){display:flex;align-items:center;flex-wrap:wrap;column-gap:12px;row-gap:6px;height:auto;min-height:64px;padding-top:0;padding-bottom:0;box-sizing:border-box}
@@ -178,6 +193,7 @@
     @media(max-width:560px){[${ROOT}]{max-width:100%}[${ROOT}] th{white-space:normal}}`;
   document.documentElement.append(style);
   async function update() {
+    if (!enabled) { hide(); return; }
     if (document.hidden) return;
     const ctx = context(document, location.href);
     if (!ctx) { document.querySelector(`[${ROOT}]`)?.remove(); current = null; return; }
@@ -194,13 +210,13 @@
       if (reply?.ok) { record = reply.record; render(document, ctx, record, refreshLikes); }
     } catch { /* Reloaded extension: the next page load reconnects. */ }
   }
-  async function refreshLikes(requested) {
+  async function refreshLikes(requested, metric = 'likes') {
     const ctx = context(document, location.href);
     if (!ctx || ctx.key !== requested.key || current?.key !== ctx.key || record?.loading) return;
     record = { ...record, loading: true, error: '' };
     render(document, ctx, record, refreshLikes);
     try {
-      const reply = await send({ type: 'mbStudioSummaryRefreshLikes', context: ctx });
+      const reply = await send({ type: metric === 'shares' ? 'mbStudioSummaryRefreshShares' : 'mbStudioSummaryRefreshLikes', context: ctx });
       if (current?.key !== ctx.key) return;
       record = reply?.ok ? reply.record : { ...record, loading: false, error: reply?.error || 'Не удалось обновить показатель. Нажмите ещё раз.' };
     } catch {
@@ -211,6 +227,12 @@
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(() => void update(), 250); }
   const changed = (changes, area) => {
+    if (area === 'local' && changes.ytsOn) {
+      enabled = changes.ytsOn.newValue !== false;
+      if (enabled) schedule(); else hide();
+      return;
+    }
+    if (!enabled) return;
     if (area === 'local' && current && changes[current.key]) {
       record = changes[current.key].newValue;
       render(document, current, record, refreshLikes);
@@ -231,7 +253,7 @@
         const metrics = readMetrics(document, location.href, job.mode), range = dateRange(document);
         const signature = JSON.stringify(metrics);
         repeats = signature === stable ? repeats + 1 : 0; stable = signature;
-        const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!metrics[job.mode === 'likes' ? 'likes' : 'duration'];
+        const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!metrics[['likes', 'shares'].includes(job.mode) ? job.mode : 'duration'];
         const home = document.querySelector('#home-button')?.getAttribute('href') || '';
         if (!home.includes('/channel/' + job.context.channelId) || range !== job.context.range || (!complete && Date.now() - started < 30000) || repeats < 2) return;
         finished = true; clearInterval(collectorTimer);
@@ -239,6 +261,7 @@
       }, 600);
       return;
     }
+    try { enabled = (await chrome.storage.local.get('ytsOn')).ytsOn !== false; } catch {}
     chrome.storage.onChanged.addListener(changed);
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     window.addEventListener('popstate', schedule); document.addEventListener('yt-navigate-finish', schedule);
