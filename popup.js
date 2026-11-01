@@ -1181,6 +1181,7 @@ markOpen();
 const STUDIO_URL = "http://127.0.0.1:8770/";
 const studioBtn = document.getElementById("studioOpen");
 const studioLabel = document.getElementById("studioLabel");
+const studioArrow = studioLabel.innerHTML;
 const studioNote = document.getElementById("studioNote");
 
 async function studioAlive() {
@@ -1203,7 +1204,7 @@ async function studioShow() {
 
 function studioFail(text) {
   studioBtn.disabled = false;
-  studioLabel.textContent = "Открыть";
+  studioLabel.innerHTML = studioArrow;
   studioNote.textContent = text;
   studioNote.hidden = false;
 }
