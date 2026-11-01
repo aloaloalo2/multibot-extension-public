@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Multi Bot",
-  "version": "2.88",
+  "version": "2.89",
   "description": "Multi Bot: HeyGen, Google Flow, YouTube, Google Classroom.",
   "permissions": [
     "scripting",
@@ -9,7 +9,8 @@
     "tabs",
     "debugger",
     "storage",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "*://*.amazonaws.com/*",
