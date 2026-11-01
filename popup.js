@@ -1216,7 +1216,10 @@ studioBtn.addEventListener("click", async () => {
   try {
     chrome.runtime.sendNativeMessage("com.videokey.studio", { command: "start" }, (reply) => {
       if (chrome.runtime.lastError) {
-        return studioFail("Студия закрыта, а помощник запуска не установлен. Дважды щёлкните «Встановити.command» в папке browser-helper студии.");
+        const why = chrome.runtime.lastError.message || "";
+        return studioFail(/not found/i.test(why)
+          ? "Студия закрыта, а помощник запуска не установлен. Дважды щёлкните «Встановити.command» в папке browser-helper студии."
+          : "Помощник запуска не сработал: " + why + ". Запустите студию «Запустить студию.command» и пришлите эту строку.");
       }
       if (!reply || !reply.ok) return studioFail((reply && reply.error) || "Студия не запустилась.");
       studioShow();
