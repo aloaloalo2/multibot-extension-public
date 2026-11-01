@@ -1202,17 +1202,23 @@ async function studioShow() {
   window.close();
 }
 
+const studioBox = document.getElementById("studioBox");
+
 function studioFail(text) {
-  studioBtn.disabled = false;
+  studioBox.classList.remove("busy");
   studioLabel.innerHTML = studioArrow;
   studioNote.textContent = text;
   studioNote.hidden = false;
 }
 
-studioBtn.addEventListener("click", async () => {
+// the item never opens like the blocks above: a click on it is the link
+studioBox.addEventListener("toggle", () => { if (studioBox.open) studioBox.open = false; });
+studioBtn.addEventListener("click", async (event) => {
+  event.preventDefault();
+  if (studioBox.classList.contains("busy")) return;
   studioNote.hidden = true;
   if (await studioAlive()) return studioShow();
-  studioBtn.disabled = true;
+  studioBox.classList.add("busy");
   studioLabel.textContent = "Запускаю…";
   try {
     chrome.runtime.sendNativeMessage("com.videokey.studio", { command: "start" }, (reply) => {
