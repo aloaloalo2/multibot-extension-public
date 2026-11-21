@@ -3,12 +3,13 @@
 // «Расширенный режим». No YouTube API, no settings changes.
 (() => {
   const ROOT = 'data-multibot-channel-summary';
-  const NAMES = ['ctr', 'duration', 'retention', 'likes', 'shares'];
-  const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.', 'Поделились/просм.'];
-  const FULL_LABELS = ['CTR для значков видео', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам'];
+  // «score» is not read from Studio: it is the channel's «Эффективность», the same 0–100 scale as the Content list.
+  const NAMES = ['ctr', 'duration', 'retention', 'likes', 'shares', 'score'];
+  const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.', 'Поделились/просм.', 'Эффективность'];
+  const FULL_LABELS = ['CTR для значков видео', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам', 'Эффективность канала 0–100 без учёта просмотров'];
   // Period chips of the Insights pages and the matching «Расширенный режим» period.
   const PERIODS = { 7: 'week', 28: '4_weeks', 90: 'quarter' };
-  const EXPLORE_METRICS = ['EXTERNAL_VIEWS', 'AVERAGE_WATCH_PERCENTAGE', 'RATINGS_LIKES', 'SHARINGS'];
+  const EXPLORE_METRICS = ['EXTERNAL_VIEWS', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME', 'RATINGS_LIKES', 'SHARINGS'];
   const text = e => (e?.textContent || '').replace(/[  ‎‏⁨⁩]/g, ' ').replace(/\s+/g, ' ').trim();
   const visible = e => e && !e.closest('[hidden], [aria-hidden="true"]') && e.getClientRects().length > 0;
   function percentage(value) {
@@ -19,6 +20,10 @@
     const s = String(value ?? '').replace(/[\s  ]/g, '');
     // Counts in the detailed report are exact. Never treat abbreviated 1.2K as exact.
     return /^\d+$/.test(s) ? Number(s) : null;
+  }
+  function seconds(value) {
+    const m = String(value || '').match(/^(?:(\d+):)?(\d+):(\d{2})$/);
+    return m ? Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
   }
   function average(values) {
     const valid = values.filter(v => Number.isFinite(v) && v >= 0);
@@ -67,6 +72,10 @@
       const result = average(rows.map(r => percentage(r.cells[n('AVERAGE_WATCH_PERCENTAGE')])));
       if (result) metrics.duration = { ...result, source: `Среднее процентов просмотра по ${result.count} роликам отчёта за выбранный период. Каждый ролик имеет одинаковый вес.` };
     }
+    if (n('AVERAGE_WATCH_TIME') >= 0) {
+      const result = average(rows.map(r => seconds(r.cells[n('AVERAGE_WATCH_TIME')])));
+      if (result) metrics.avd = { ...result, source: `Средняя длина одного просмотра по ${result.count} роликам отчёта за выбранный период.` };
+    }
     for (const [name, column, label] of [['likes', 'RATINGS_LIKES', 'лайки'], ['shares', 'SHARINGS', 'число публикаций через «Поделиться»']]) {
       if (n(column) < 0) continue;
       const values = rows.map(r => { const v = count(r.cells[n(column)]); return v === null || (name === 'likes' && v > r.views) ? null : v / r.views * 100; });
@@ -88,8 +97,8 @@
       const views = count(cells[n('EXTERNAL_VIEWS')]);
       if (views === null) continue;
       const video = { views }, pct = name => n(name) < 0 ? null : percentage(cells[n(name)]);
-      const time = n('AVERAGE_WATCH_TIME') < 0 ? null : (cells[n('AVERAGE_WATCH_TIME')].match(/^(?:(\d+):)?(\d+):(\d{2})$/) || null);
-      if (time) video.avd = Number(time[1] || 0) * 3600 + Number(time[2]) * 60 + Number(time[3]);
+      const time = n('AVERAGE_WATCH_TIME') < 0 ? null : seconds(cells[n('AVERAGE_WATCH_TIME')]);
+      if (time !== null) video.avd = time;
       const per = name => { const v = n(name) < 0 ? null : count(cells[n(name)]); return v === null || !views ? null : v / views * 100; };
       for (const [k, v] of [['ctr', pct('VIDEO_THUMBNAIL_IMPRESSIONS_VTR')], ['avp', pct('AVERAGE_WATCH_PERCENTAGE')], ['likes', per('RATINGS_LIKES')], ['shares', per('SHARINGS')]])
         if (v !== null) video[k] = v;
@@ -164,9 +173,10 @@
     table.dataset.channel = ctx.channelId;
     const one = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     const two = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    const efficiency = channelScore(record);
     for (const name of NAMES) {
       const cell = table.querySelector(`[data-metric="${name}"]`), metric = record?.metrics?.[name];
-      const ok = metric && Number.isFinite(metric.value);
+      const ok = name === 'score' ? !!efficiency : metric && Number.isFinite(metric.value);
       let button = cell.querySelector('button');
       if (!button) {
         button = doc.createElement('button'); button.type = 'button'; button.setAttribute('data-refresh-likes', '');
@@ -174,17 +184,25 @@
         const icon = doc.createElement('span'); icon.setAttribute('data-refresh-icon', ''); icon.setAttribute('aria-hidden', 'true'); icon.textContent = '↻';
         button.append(span, icon); cell.replaceChildren(button);
       }
-      const span = button.querySelector('[data-likes-value]'), labelText = ok ? (name === 'shares' ? two : one).format(metric.value) + '%' : '—';
+      const span = button.querySelector('[data-likes-value]');
+      const labelText = !ok ? '—' : name === 'score' ? String(efficiency.value) : (name === 'shares' ? two : one).format(metric.value) + '%';
       if (span.textContent !== labelText) span.textContent = labelText;
       button.disabled = !!record?.loading;
       button.setAttribute('aria-label', record?.loading ? `Обновление: ${FULL_LABELS[NAMES.indexOf(name)]}` : 'Обновить показатели канала');
-      const about = ok ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : 'Период: ' + ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}\n` : '';
+      const about = name === 'score' ? (ok ? efficiency.explain + '\n' : 'Нужно минимум два показателя.\n') : ok ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : 'Период: ' + ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}\n` : '';
       button.title = record?.loading ? 'Загружаем отчёты этого канала.' : `${about}${record?.error ? record.error + '\n' : ''}Обновить все показатели из отчётов текущего канала.`;
       button.onclick = () => onRefresh?.(ctx);
     }
   }
+  // The channel's averages on the Content list scale (yt-studio-efficiency.js, loaded in the same content-script world).
+  function channelScore(record) {
+    const scale = globalThis.__mbEfficiency || (typeof require === 'function' ? require('./yt-studio-efficiency.js') : null);
+    const m = record?.metrics || {}, v = name => Number.isFinite(m[name]?.value) ? m[name].value : undefined;
+    const result = scale?.score({ views: Infinity, ctr: v('ctr'), avp: v('duration'), avd: v('avd'), likes: v('likes'), shares: v('shares') });
+    return result ? { value: result.value, explain: scale.explain(result) } : null;
+  }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { percentage, count, average, contentMetrics, exploreMetrics, exploreVideos, readMetrics, context, dateRange, render, PERIODS };
+    module.exports = { channelScore, percentage, count, average, contentMetrics, exploreMetrics, exploreVideos, readMetrics, context, dateRange, render, PERIODS };
     return;
   }
   globalThis.__mbStudioSummaryCleanup?.();

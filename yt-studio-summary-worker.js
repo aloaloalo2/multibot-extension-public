@@ -2,7 +2,7 @@
 // No YouTube API credentials, direct API calls or changes to channel settings.
 (() => {
   const PREFIX = 'mbStudioSummary:', EFFICIENCY = 'mbEfficiency:';
-  const METRICS = ['ctr', 'duration', 'retention', 'likes', 'shares'];
+  const METRICS = ['ctr', 'duration', 'avd', 'retention', 'likes', 'shares'];
   const queue = [];
   const pending = new Set();
   let active = null;
@@ -51,7 +51,7 @@
     for (const name of METRICS) {
       const metric = input?.[name];
       if (!metric || !Number.isFinite(metric.value) || metric.value < 0 ||
-          metric.value > (['duration', 'retention', 'shares'].includes(name) ? 10000 : 100) ||
+          metric.value > (name === 'avd' ? 86400 : ['duration', 'retention', 'shares'].includes(name) ? 10000 : 100) ||
           !Number.isInteger(metric.count) || metric.count < 1 || metric.count > 100000) continue;
       result[name] = { value: metric.value, count: metric.count,
         source: String(metric.source || '').slice(0, 350), at: now };
@@ -185,7 +185,7 @@
         await next();
         return { ok: true };
       }
-      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : ['duration', 'likes', 'shares'];
+      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : ['duration', 'avd', 'likes', 'shares'];
       const metrics = Object.fromEntries(allowed.filter(k => message.metrics?.[k]).map(k => [k, message.metrics[k]]));
       await merge(job.context, metrics);
       await next();

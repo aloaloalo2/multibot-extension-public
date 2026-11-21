@@ -44,6 +44,7 @@
   }
   if (typeof module === 'object' && module.exports) { module.exports = { score, context, exploreUrl, explain, BENCHMARKS }; return; }
 
+  globalThis.__mbEfficiency = { score, explain };   // the Insights table scores the channel on this scale
   globalThis.__mbEfficiencyCleanup?.();
   let enabled = true, ctx = null, record = null, timer, lastKey = '';
   const send = message => chrome.runtime.sendMessage(message);
