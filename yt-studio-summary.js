@@ -1,17 +1,22 @@
-// A compact channel header table. Every value comes from rendered Studio reports.
+// A compact channel header table on Studio «Инсайты» (hub_* pages, November 2026).
+// Every value comes from rendered Studio reports: CTR and 0:30 retention from «Контент», the per-video averages from
+// «Расширенный режим». No YouTube API, no settings changes.
 (() => {
   const ROOT = 'data-multibot-channel-summary';
   const NAMES = ['ctr', 'duration', 'retention', 'likes', 'shares'];
   const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.', 'Поделились/просм.'];
-  const FULL_LABELS = ['Средний CTR', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам'];
-  const text = e => (e?.textContent || '').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim();
+  const FULL_LABELS = ['CTR для значков видео', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам'];
+  // Period chips of the Insights pages and the matching «Расширенный режим» period.
+  const PERIODS = { 7: 'week', 28: '4_weeks', 90: 'quarter' };
+  const EXPLORE_METRICS = ['EXTERNAL_VIEWS', 'AVERAGE_WATCH_PERCENTAGE', 'RATINGS_LIKES', 'SHARINGS'];
+  const text = e => (e?.textContent || '').replace(/[  ‎‏⁨⁩]/g, ' ').replace(/\s+/g, ' ').trim();
   const visible = e => e && !e.closest('[hidden], [aria-hidden="true"]') && e.getClientRects().length > 0;
   function percentage(value) {
-    const m = String(value || '').replace(/[\u00a0\u202f]/g, ' ').match(/^\s*\(?\s*(\d+(?:[.,]\d+)?)\s*%\s*\)?\s*$/);
+    const m = String(value || '').replace(/[  ]/g, ' ').match(/^\s*\(?\s*(\d+(?:[.,]\d+)?)\s*%\s*\)?\s*$/);
     return m ? Number(m[1].replace(',', '.')) : null;
   }
   function count(value) {
-    const s = String(value ?? '').replace(/[\s\u00a0\u202f]/g, '');
+    const s = String(value ?? '').replace(/[\s  ]/g, '');
     // Counts in the detailed report are exact. Never treat abbreviated 1.2K as exact.
     return /^\d+$/.test(s) ? Number(s) : null;
   }
@@ -19,104 +24,129 @@
     const valid = values.filter(v => Number.isFinite(v) && v >= 0);
     return valid.length ? { value: valid.reduce((a, b) => a + b, 0) / valid.length, count: valid.length } : null;
   }
-  function durationMetric(doc) {
-    for (const table of doc.querySelectorAll('yta-top-performing-entities')) {
-      const headers = [...table.querySelectorAll('.header.metric')];
-      const index = headers.findIndex(h => /средняя продолжительность просмотра|середня тривалість перегляду|average view duration/i.test(text(h)));
-      if (index < 0) continue;
-      const rows = [...table.querySelectorAll('.row')].filter(visible);
-      const result = average(rows.map(row => percentage(text(row.querySelectorAll('.metric-cell')[index]?.querySelector('.percentage')))));
-      if (result) return { ...result, source: `Среднее процентов по ${result.count} показанным роликам в обзоре. Каждый ролик имеет одинаковый вес.` };
-    }
-    return null;
-  }
+  // «Контент» in Insights: the CTR simple metric and the «Ключевые моменты» card on its 0:30 intro list.
   function contentMetrics(doc) {
     const metrics = {};
-    for (const block of doc.querySelectorAll('yta-key-metric-block')) {
-      if (!visible(block)) continue;
-      if (/CTR|click.through.rate|рейтинг кліків/i.test(text(block.querySelector('#metric-label')))) {
-        const value = percentage(text(block.querySelector('#metric-total')));
-        if (value !== null) metrics.ctr = { value, count: 1, source: 'Показатель CTR из вкладки «Контент» за выбранный период.' };
-      }
+    for (const metric of doc.querySelectorAll('ytcp-simple-metric-view-model')) {
+      if (!visible(metric)) continue;
+      let box = metric.parentElement;
+      for (let i = 0; i < 5 && box && !box.querySelector('.ytBasicContentViewModelParagraphHeadline'); i++) box = box.parentElement;
+      if (!/CTR|click.through/i.test(text(box?.querySelector('.ytBasicContentViewModelParagraphHeadline')))) continue;
+      const value = percentage(text(metric.querySelector('.ytcpSimpleMetricValue')));
+      if (value !== null) { metrics.ctr = { value, count: 1, source: 'CTR для значков видео из «Инсайты → Контент» за выбранный период.' }; break; }
     }
-    for (const card of doc.querySelectorAll('yta-audience-retention-highlights-channel-card-v2')) {
+    for (const card of doc.querySelectorAll('yt-card-view-model')) {
       if (!visible(card)) continue;
-      if (!/0\s*:\s*30/.test(text(card.querySelector('.rows-header-title-right')))) continue;
-      const values = [...card.querySelectorAll('.left-side .row')].filter(visible).map(row => percentage(text(row.querySelector('.value'))));
-      const result = average(values);
-      if (result) metrics.retention = { ...result, source: `Среднее по ${result.count} роликам блока 0:30. Блок Studio использует видео, опубликованные за последние 365 дней.` };
+      const labels = [...card.querySelectorAll('yt-list-item-view-model')].filter(visible)
+        .map(item => text(item.querySelector('.ytListItemViewModelTrailingLabel')));
+      if (!labels.some(label => /0\s*:\s*30/.test(label))) continue;
+      const result = average(labels.map(percentage));
+      if (result) metrics.retention = { ...result, source: `Среднее по ${result.count} роликам блока «Ключевые моменты», вкладка «Вступления» (0:30). Блок Studio берёт новые видео за последние 365 дней.` };
+      break;
     }
     return metrics;
   }
-  function ratioMetric(doc, rawUrl, metricName) {
+  // «Расширенный режим», one row per video: views, average percentage viewed, likes, shares.
+  function exploreMetrics(doc, rawUrl) {
     const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics');
-    const vi = columns.indexOf('EXTERNAL_VIEWS'), li = columns.indexOf(metricName);
-    if (vi < 0 || li < 0 || u.searchParams.get('dimension') !== 'VIDEO') return null;
+    const vi = columns.indexOf('EXTERNAL_VIEWS');
+    if (vi < 0 || u.searchParams.get('dimension') !== 'VIDEO') return {};
     const root = doc.querySelector('#debug-explore-table');
-    if (!root || !visible(root)) return null;
-    const values = [];
+    if (!root || !visible(root)) return {};
+    const rows = [];
     for (const row of root.querySelectorAll('yta-explore-table-row')) {
       const label = text(row.querySelector('.debug-dimension-value'));
-      if (!label || /^(итого|total|усього|всього)$/i.test(label)) continue;
-      const cells = [...row.querySelectorAll('.debug-metric-value')];
+      if (!label || /^(итого|total|усього|всього|разом)$/i.test(label)) continue;
+      const cells = [...row.querySelectorAll('.debug-metric-value')].map(text);
       if (cells.length !== columns.length) continue;
-      const views = count(text(cells[vi])), likes = count(text(cells[li]));
-      if (views > 0 && likes !== null && (metricName !== 'RATINGS_LIKES' || likes <= views)) values.push(likes / views * 100);
+      const views = count(cells[vi]);
+      if (views > 0) rows.push({ views, cells });
     }
-    const result = average(values);
-    const label = metricName === 'SHARINGS' ? 'число публикаций через «Поделиться»' : 'лайки';
-    return result ? { ...result, source: `Среднее (${label} ÷ просмотры × 100%) по ${result.count} роликам отчёта за выбранный период. Ролики без просмотров исключены.` } : null;
+    const metrics = {}, n = name => columns.indexOf(name);
+    if (n('AVERAGE_WATCH_PERCENTAGE') >= 0) {
+      const result = average(rows.map(r => percentage(r.cells[n('AVERAGE_WATCH_PERCENTAGE')])));
+      if (result) metrics.duration = { ...result, source: `Среднее процентов просмотра по ${result.count} роликам отчёта за выбранный период. Каждый ролик имеет одинаковый вес.` };
+    }
+    for (const [name, column, label] of [['likes', 'RATINGS_LIKES', 'лайки'], ['shares', 'SHARINGS', 'число публикаций через «Поделиться»']]) {
+      if (n(column) < 0) continue;
+      const values = rows.map(r => { const v = count(r.cells[n(column)]); return v === null || (name === 'likes' && v > r.views) ? null : v / r.views * 100; });
+      const result = average(values);
+      if (result) metrics[name] = { ...result, source: `Среднее (${label} ÷ просмотры × 100%) по ${result.count} роликам отчёта за выбранный период. Ролики без просмотров исключены.` };
+    }
+    return metrics;
   }
-  const likesMetric = (doc, url) => ratioMetric(doc, url, 'RATINGS_LIKES');
-  const sharesMetric = (doc, url) => ratioMetric(doc, url, 'SHARINGS');
+  // The same report per video for «Эффективность» on the Content list: {videoId: {views, ctr, avp, likes, shares}}.
+  function exploreVideos(doc, rawUrl) {
+    const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics'), n = name => columns.indexOf(name);
+    const root = doc.querySelector('#debug-explore-table');
+    if (n('EXTERNAL_VIEWS') < 0 || u.searchParams.get('dimension') !== 'VIDEO' || !root || !visible(root)) return {};
+    const videos = {};
+    for (const row of root.querySelectorAll('yta-explore-table-row')) {
+      const id = (row.querySelector('img')?.getAttribute('src') || '').match(/\/vi(?:_webp)?\/([\w-]{11})\//)?.[1];
+      const cells = [...row.querySelectorAll('.debug-metric-value')].map(text);
+      if (!id || cells.length !== columns.length) continue;
+      const views = count(cells[n('EXTERNAL_VIEWS')]);
+      if (views === null) continue;
+      const video = { views }, pct = name => n(name) < 0 ? null : percentage(cells[n(name)]);
+      const time = n('AVERAGE_WATCH_TIME') < 0 ? null : (cells[n('AVERAGE_WATCH_TIME')].match(/^(?:(\d+):)?(\d+):(\d{2})$/) || null);
+      if (time) video.avd = Number(time[1] || 0) * 3600 + Number(time[2]) * 60 + Number(time[3]);
+      const per = name => { const v = n(name) < 0 ? null : count(cells[n(name)]); return v === null || !views ? null : v / views * 100; };
+      for (const [k, v] of [['ctr', pct('VIDEO_THUMBNAIL_IMPRESSIONS_VTR')], ['avp', pct('AVERAGE_WATCH_PERCENTAGE')], ['likes', per('RATINGS_LIKES')], ['shares', per('SHARINGS')]])
+        if (v !== null) video[k] = v;
+      videos[id] = video;
+    }
+    return videos;
+  }
   function readMetrics(doc, rawUrl, mode) {
-    if (mode === 'content') return contentMetrics(doc);
-    const value = mode === 'likes' ? likesMetric(doc, rawUrl) : mode === 'shares' ? sharesMetric(doc, rawUrl) : durationMetric(doc);
-    return value ? { [['likes', 'shares'].includes(mode) ? mode : 'duration']: value } : {};
+    return mode === 'explore' ? exploreMetrics(doc, rawUrl) : mode === 'content' ? contentMetrics(doc) : {};
+  }
+  // The Insights period chips («7 дней · 28 дней · 90 дней · Ещё»).
+  function periodChips(doc) {
+    for (const bar of doc.querySelectorAll('chip-bar-view-model')) {
+      if (!visible(bar)) continue;
+      const chips = [...bar.querySelectorAll('chip-view-model')];
+      if (chips.filter(c => /^\d+\s*\D+$/.test(text(c))).length < 2) continue;
+      return chips;
+    }
+    return [];
   }
   function dateRange(doc) {
-    const picker = [...doc.querySelectorAll('yta-time-picker')].filter(visible).at(-1);
-    return text(picker?.querySelector('.label-text'));
+    return text(periodChips(doc).find(c => c.querySelector('.ytChipShapeActive')));
   }
   function hash(s) {
     let value = 2166136261;
     for (const char of s) value = Math.imul(value ^ char.charCodeAt(0), 16777619);
     return (value >>> 0).toString(36);
   }
-  function context(doc, rawUrl) {
-    const u = new URL(rawUrl), match = u.pathname.match(/^\/channel\/(UC[\w-]{22})\/analytics\/(tab-[^/]+)\/(period-[^/]+)(?:\/|$)/);
-    if (!match || u.pathname.includes('/explore')) return null;
-    const channelId = match[1], range = dateRange(doc);
-    const home = doc.querySelector('#home-button')?.getAttribute('href') || '';
-    if (!range || !home.includes('/channel/' + channelId)) return null;
-    const heading = [...doc.querySelectorAll('h1')].find(e => visible(e) && /аналитика по каналу|аналітика каналу|channel analytics/i.test(text(e)));
-    if (!heading) return null;
-    const advanced = doc.querySelector('#page-title-container .advanced-analytics-container a[href]') ||
-      [...doc.querySelectorAll('a[href]')].find(a => a.getAttribute('href').includes('/analytics/') && a.getAttribute('href').includes('/explore?'));
-    if (!advanced) return null;
-    const overview = new URL(u), content = new URL(u), likes = new URL(advanced.getAttribute('href'), u.origin);
-    overview.pathname = u.pathname.replace(/\/tab-[^/]+\//, '/tab-overview/');
-    content.pathname = u.pathname.replace(/\/tab-[^/]+\//, '/tab-content/');
-    likes.searchParams.delete('t_metrics');
-    likes.searchParams.append('t_metrics', 'EXTERNAL_VIEWS');
-    likes.searchParams.append('t_metrics', 'RATINGS_LIKES');
-    likes.searchParams.set('dimension', 'VIDEO');
-    likes.searchParams.set('metric', 'EXTERNAL_VIEWS');
-    likes.searchParams.set('o_column', 'EXTERNAL_VIEWS');
-    const shares = new URL(likes);
-    shares.searchParams.delete('t_metrics');
-    shares.searchParams.append('t_metrics', 'EXTERNAL_VIEWS');
-    shares.searchParams.append('t_metrics', 'SHARINGS');
-    const period = new URL(likes); period.searchParams.delete('t_metrics');
-    period.searchParams.delete('metric'); period.searchParams.delete('o_column');
-    period.pathname = period.pathname.replace(/\/tab-[^/]+\//, '/tab-overview/');
-    return { channelId, range, key: `mbStudioSummary:${channelId}:${hash(range + '|' + period.href)}`,
-      overviewUrl: overview.href, contentUrl: content.href, likesUrl: likes.href, sharesUrl: shares.href };
+  // The page title row («Статистика канала», «Контент»…): the first header with the «Расширенный режим» action.
+  function titleRow(doc) {
+    for (const header of doc.querySelectorAll('yt-shelf-header-layout')) {
+      if (!visible(header)) continue;
+      if (!header.querySelector('.ytShelfHeaderLayoutTrailingActions button')) continue;
+      return header.querySelector('.ytShelfHeaderLayoutHeaderRow');
+    }
+    return null;
   }
-  function render(doc, ctx, record, onRefreshLikes) {
-    const heading = [...doc.querySelectorAll('h1')].find(e => visible(e) && /аналитика по каналу|аналітика каналу|channel analytics/i.test(text(e)));
-    if (!heading) return;
-    const parent = heading.parentElement;
+  function context(doc, rawUrl) {
+    const u = new URL(rawUrl), match = u.pathname.match(/^\/channel\/(UC[\w-]{22})\/analytics\/(hub_[a-z_]+)\/?$/);
+    if (!match) return null;
+    const channelId = match[1], range = dateRange(doc), days = Number((range.match(/^(\d+)/) || [])[1]);
+    const home = doc.querySelector('#home-button')?.getAttribute('href') || '';
+    if (!range || !PERIODS[days] || !home.includes('/channel/' + channelId) || !titleRow(doc)) return null;
+    const base = `${u.origin}/channel/${channelId}/analytics/`;
+    const explore = new URL(base + 'hub_content/explore');
+    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', PERIODS[days]], ['explore_type', 'TABLE_AND_CHART'],
+      ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) explore.searchParams.set(k, v);
+    for (const m of EXPLORE_METRICS) explore.searchParams.append('t_metrics', m);
+    explore.searchParams.set('dimension', 'VIDEO');
+    explore.searchParams.set('o_column', 'EXTERNAL_VIEWS');
+    explore.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
+    return { channelId, range, period: PERIODS[days], key: `mbStudioSummary:${channelId}:${hash('insights|' + PERIODS[days])}`,
+      contentUrl: base + 'hub_content', exploreUrl: explore.href };
+  }
+  function render(doc, ctx, record, onRefresh) {
+    const row = titleRow(doc);
+    if (!row) return;
     let table = doc.querySelector(`[${ROOT}]`);
     if (!table) {
       table = doc.createElement('table'); table.setAttribute(ROOT, '');
@@ -128,38 +158,33 @@
       }
       const thead = doc.createElement('thead'), tbody = doc.createElement('tbody');
       thead.append(head); tbody.append(body); table.append(thead, tbody);
-      heading.after(table);
-    } else if (table.parentElement !== parent) heading.after(table);
+    }
+    const label = row.querySelector('.ytShelfHeaderLayoutLabelContainer');
+    if (table.parentElement !== row) (label ? label.after(table) : row.append(table));
     table.dataset.channel = ctx.channelId;
-    const formatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const one = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const two = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
     for (const name of NAMES) {
-      const cell = table.querySelector(`[data-metric="${name}"]`), saved = record?.metrics?.[name];
-      const metric = saved && Date.now() >= saved.at && (['likes', 'shares'].includes(name) || Date.now() - saved.at < 15 * 60000) ? saved : null;
-      const value = metric && Number.isFinite(metric.value) ? (name === 'shares' ? new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(metric.value) : formatter.format(metric.value)) + '%' : '-';
-      const title = metric ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}` : 'Откройте соответствующую вкладку аналитики для чтения показателя.';
-      if (['likes', 'shares'].includes(name)) {
-        let button = cell.querySelector('button');
-        if (!button) {
-          button = doc.createElement('button'); button.type = 'button'; button.setAttribute('data-refresh-likes', '');
-          const label = doc.createElement('span'); label.setAttribute('data-likes-value', '');
-          const icon = doc.createElement('span'); icon.setAttribute('data-refresh-icon', ''); icon.setAttribute('aria-hidden', 'true'); icon.textContent = '↻';
-          button.append(label, icon); cell.replaceChildren(button);
-        }
-        const label = button.querySelector('[data-likes-value]'), labelText = metric ? value : 'Обновить';
-        if (label.textContent !== labelText) label.textContent = labelText;
-        button.disabled = !!record?.loading;
-        const labelName = name === 'shares' ? 'публикации к просмотрам' : 'лайки к просмотрам';
-        button.setAttribute('aria-label', record?.loading ? `Обновление: ${labelName}` : `Обновить ${labelName}`);
-        button.title = record?.loading ? 'Загружаем отчёт этого канала.' : `${metric ? title + '\n' : ''}${record?.error ? record.error + '\n' : ''}Обновить из отчёта текущего канала.`;
-        button.onclick = () => onRefreshLikes?.(ctx, name);
-        continue;
+      const cell = table.querySelector(`[data-metric="${name}"]`), metric = record?.metrics?.[name];
+      const ok = metric && Number.isFinite(metric.value);
+      let button = cell.querySelector('button');
+      if (!button) {
+        button = doc.createElement('button'); button.type = 'button'; button.setAttribute('data-refresh-likes', '');
+        const span = doc.createElement('span'); span.setAttribute('data-likes-value', '');
+        const icon = doc.createElement('span'); icon.setAttribute('data-refresh-icon', ''); icon.setAttribute('aria-hidden', 'true'); icon.textContent = '↻';
+        button.append(span, icon); cell.replaceChildren(button);
       }
-      if (cell.textContent !== value) cell.textContent = value;
-      if (cell.title !== title) cell.title = title;
+      const span = button.querySelector('[data-likes-value]'), labelText = ok ? (name === 'shares' ? two : one).format(metric.value) + '%' : '—';
+      if (span.textContent !== labelText) span.textContent = labelText;
+      button.disabled = !!record?.loading;
+      button.setAttribute('aria-label', record?.loading ? `Обновление: ${FULL_LABELS[NAMES.indexOf(name)]}` : 'Обновить показатели канала');
+      const about = ok ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : 'Период: ' + ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}\n` : '';
+      button.title = record?.loading ? 'Загружаем отчёты этого канала.' : `${about}${record?.error ? record.error + '\n' : ''}Обновить все показатели из отчётов текущего канала.`;
+      button.onclick = () => onRefresh?.(ctx);
     }
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { percentage, count, average, durationMetric, contentMetrics, likesMetric, sharesMetric, readMetrics, context, dateRange, render };
+    module.exports = { percentage, count, average, contentMetrics, exploreMetrics, exploreVideos, readMetrics, context, dateRange, render, PERIODS };
     return;
   }
   globalThis.__mbStudioSummaryCleanup?.();
@@ -173,24 +198,23 @@
   }
   const send = message => chrome.runtime.sendMessage(message);
   const style = document.createElement('style');
-  style.textContent = `#page-title-container:has(>[${ROOT}]){display:flex;align-items:center;flex-wrap:wrap;column-gap:12px;row-gap:6px;height:auto;min-height:64px;padding-top:0;padding-bottom:0;box-sizing:border-box}
-    #page-title-container:has(>[${ROOT}])>h1{flex:0 0 auto;min-width:0;margin:0!important;padding-top:0!important;padding-bottom:0!important;line-height:1.25;align-self:center}
-    #page-title-container:has(>[${ROOT}])>.advanced-analytics-container{margin-left:auto;flex-shrink:0}
-    [${ROOT}]{border:1px solid var(--ytcp-line-divider,#3f3f3f);border-radius:6px;border-spacing:0;overflow:hidden;color:var(--ytcp-text-primary,#f1f1f1);font-family:Roboto,Arial,sans-serif;margin:0 auto 0 0;flex:0 0 auto;width:auto;max-width:100%;align-self:center;table-layout:auto;transform:translateY(3px)}
-    [${ROOT}] th,[${ROOT}] td{text-align:center;padding:0 8px;border-right:1px solid var(--ytcp-line-divider,#3f3f3f);white-space:nowrap;letter-spacing:0}
-    [${ROOT}] th{font-size:10px;line-height:12px;font-weight:400;color:var(--ytcp-text-secondary,#aaa);padding-top:2px;padding-bottom:0}
+  style.textContent = `.ytShelfHeaderLayoutHeaderRow:has(>[${ROOT}]){flex-wrap:wrap;column-gap:16px;row-gap:6px}
+    .ytShelfHeaderLayoutHeaderRow:has(>[${ROOT}])>.ytShelfHeaderLayoutLabelContainer{flex:0 1 auto}
+    .ytShelfHeaderLayoutHeaderRow:has(>[${ROOT}])>.ytShelfHeaderLayoutTrailingActions{margin-left:auto}
+    [${ROOT}]{border:1px solid var(--yt-spec-10-percent-layer,#3f3f3f);border-radius:6px;border-spacing:0;overflow:hidden;color:var(--yt-spec-text-primary,#f1f1f1);font-family:Roboto,Arial,sans-serif;margin:0 auto 0 0;flex:0 0 auto;width:auto;max-width:100%;align-self:center;table-layout:auto}
+    [${ROOT}] th,[${ROOT}] td{text-align:center;padding:0 8px;border-right:1px solid var(--yt-spec-10-percent-layer,#3f3f3f);white-space:nowrap;letter-spacing:0}
+    [${ROOT}] th{font-size:10px;line-height:12px;font-weight:400;color:var(--yt-spec-text-secondary,#aaa);padding-top:2px;padding-bottom:0}
     [${ROOT}] td{font-size:13px;line-height:15px;font-weight:500;padding-top:0;padding-bottom:2px;font-variant-numeric:tabular-nums}
     [${ROOT}] th:last-child,[${ROOT}] td:last-child{border-right:0}
     [${ROOT}] button{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0;border:0;background:transparent;color:inherit;font:inherit;line-height:inherit;cursor:pointer}
-    [${ROOT}] button:hover{color:var(--ytcp-text-primary,#fff)}
     [${ROOT}] button:focus-visible{outline:1px solid currentColor;outline-offset:2px;border-radius:2px}
-    [${ROOT}] [data-refresh-icon]{display:inline-block;font-size:14px;line-height:14px;color:var(--ytcp-text-secondary,#aaa)}
+    [${ROOT}] [data-refresh-icon]{display:inline-block;font-size:13px;line-height:13px;color:var(--yt-spec-text-secondary,#aaa);opacity:0;transition:opacity .15s}
+    [${ROOT}]:hover [data-refresh-icon],[${ROOT}] button:focus-visible [data-refresh-icon],[${ROOT}] button:disabled [data-refresh-icon]{opacity:1}
     [${ROOT}] button:disabled{cursor:wait;opacity:.65}
     [${ROOT}] button:disabled [data-refresh-icon]{animation:mb-summary-refresh 1s linear infinite}
     @keyframes mb-summary-refresh{to{transform:rotate(360deg)}}
     @media(prefers-reduced-motion:reduce){[${ROOT}] button:disabled [data-refresh-icon]{animation:none}}
-    @media(max-width:1000px){[${ROOT}] th,[${ROOT}] td{padding-left:6px;padding-right:6px}[${ROOT}] th{font-size:9px}}
-    @media(max-width:560px){[${ROOT}]{max-width:100%}[${ROOT}] th{white-space:normal}}`;
+    @media(max-width:1000px){[${ROOT}] th,[${ROOT}] td{padding-left:6px;padding-right:6px}[${ROOT}] th{font-size:9px}}`;
   document.documentElement.append(style);
   async function update() {
     if (!enabled) { hide(); return; }
@@ -198,32 +222,33 @@
     const ctx = context(document, location.href);
     if (!ctx) { document.querySelector(`[${ROOT}]`)?.remove(); current = null; return; }
     if (ctx.key !== lastKey) { lastKey = ctx.key; keySince = Date.now(); current = ctx; record = null; lastRequest = ''; }
-    render(document, ctx, record, refreshLikes);
+    render(document, ctx, record, refresh);
     if (Date.now() - keySince < 800) { schedule(); return; }
-    const metrics = readMetrics(document, location.href, location.pathname.includes('/tab-content/') ? 'content' : 'overview');
+    // On «Контент» the visible CTR and retention are saved while the author looks at them.
+    const metrics = /\/hub_content\/?$/.test(location.pathname) ? contentMetrics(document) : {};
     const signature = ctx.key + JSON.stringify(metrics);
     if (signature === lastRequest && Date.now() - lastRequestAt < 60000) return;
     lastRequest = signature; lastRequestAt = Date.now();
     try {
       const reply = await send({ type: 'mbStudioSummaryGet', context: ctx, metrics });
       if (current?.key !== ctx.key) return;
-      if (reply?.ok) { record = reply.record; render(document, ctx, record, refreshLikes); }
+      if (reply?.ok) { record = reply.record; render(document, ctx, record, refresh); }
     } catch { /* Reloaded extension: the next page load reconnects. */ }
   }
-  async function refreshLikes(requested, metric = 'likes') {
+  async function refresh(requested) {
     const ctx = context(document, location.href);
     if (!ctx || ctx.key !== requested.key || current?.key !== ctx.key || record?.loading) return;
     record = { ...record, loading: true, error: '' };
-    render(document, ctx, record, refreshLikes);
+    render(document, ctx, record, refresh);
     try {
-      const reply = await send({ type: metric === 'shares' ? 'mbStudioSummaryRefreshShares' : 'mbStudioSummaryRefreshLikes', context: ctx });
+      const reply = await send({ type: 'mbStudioSummaryRefresh', context: ctx });
       if (current?.key !== ctx.key) return;
-      record = reply?.ok ? reply.record : { ...record, loading: false, error: reply?.error || 'Не удалось обновить показатель. Нажмите ещё раз.' };
+      record = reply?.ok ? reply.record : { ...record, loading: false, error: reply?.error || 'Не удалось обновить показатели. Нажмите ещё раз.' };
     } catch {
       if (current?.key !== ctx.key) return;
       record = { ...record, loading: false, error: 'Перезагрузите страницу после обновления расширения.' };
     }
-    render(document, ctx, record, refreshLikes);
+    render(document, ctx, record, refresh);
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(() => void update(), 250); }
   const changed = (changes, area) => {
@@ -235,32 +260,48 @@
     if (!enabled) return;
     if (area === 'local' && current && changes[current.key]) {
       record = changes[current.key].newValue;
-      render(document, current, record, refreshLikes);
+      render(document, current, record, refresh);
     }
   };
   const observer = new MutationObserver(mutations => {
     if (mutations.some(m => !m.target.parentElement?.closest(`[${ROOT}]`) && !m.target.closest?.(`[${ROOT}]`))) schedule();
   });
+  // A background report tab: read it (choosing the requested period on «Контент») and hand the values back.
+  function collect(job) {
+    const started = Date.now();
+    let stable = '', repeats = 0, finished = false, clickedAt = 0;
+    collectorTimer = setInterval(async () => {
+      if (finished) return;
+      const home = document.querySelector('#home-button')?.getAttribute('href') || '';
+      if (!home.includes('/channel/' + job.context.channelId)) return;
+      if (job.mode === 'content') {
+        const chips = periodChips(document), active = chips.find(c => c.querySelector('.ytChipShapeActive'));
+        if (!chips.length) return;
+        if (text(active) !== job.context.range) {
+          if (Date.now() - clickedAt > 3000) { clickedAt = Date.now(); chips.find(c => text(c) === job.context.range)?.querySelector('button')?.click(); }
+          return;
+        }
+      } else if (new URL(location.href).searchParams.get('time_period') !== job.context.period) return;
+      if (job.mode === 'videos') {
+        const videos = exploreVideos(document, location.href), signature = JSON.stringify(videos);
+        repeats = signature === stable ? repeats + 1 : 0; stable = signature;
+        if ((!Object.keys(videos).length && Date.now() - started < 20000) || repeats < 2) return;
+        finished = true; clearInterval(collectorTimer);
+        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, videos }); } catch {}
+        return;
+      }
+      const metrics = readMetrics(document, location.href, job.mode), signature = JSON.stringify(metrics);
+      repeats = signature === stable ? repeats + 1 : 0; stable = signature;
+      const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!(metrics.duration && metrics.likes && metrics.shares);
+      if ((!complete && Date.now() - started < 20000) || repeats < 2) return;
+      finished = true; clearInterval(collectorTimer);
+      try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, metrics }); } catch {}
+    }, 600);
+  }
   async function boot() {
     let probe;
     try { probe = await send({ type: 'mbStudioSummaryProbe' }); } catch { return; }
-    if (probe?.collector) {
-      style.remove();
-      const job = probe.collector, started = Date.now();
-      let stable = '', repeats = 0, finished = false;
-      collectorTimer = setInterval(async () => {
-        if (finished) return;
-        const metrics = readMetrics(document, location.href, job.mode), range = dateRange(document);
-        const signature = JSON.stringify(metrics);
-        repeats = signature === stable ? repeats + 1 : 0; stable = signature;
-        const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!metrics[['likes', 'shares'].includes(job.mode) ? job.mode : 'duration'];
-        const home = document.querySelector('#home-button')?.getAttribute('href') || '';
-        if (!home.includes('/channel/' + job.context.channelId) || range !== job.context.range || (!complete && Date.now() - started < 30000) || repeats < 2) return;
-        finished = true; clearInterval(collectorTimer);
-        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range, metrics }); } catch {}
-      }, 600);
-      return;
-    }
+    if (probe?.collector) { style.remove(); collect(probe.collector); return; }
     try { enabled = (await chrome.storage.local.get('ytsOn')).ytsOn !== false; } catch {}
     chrome.storage.onChanged.addListener(changed);
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });

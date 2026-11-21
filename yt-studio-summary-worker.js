@@ -1,7 +1,7 @@
-// Read visible-page metrics without opening tabs. Collect likes only on request.
+// Read visible-page metrics without opening tabs. Open the reports only when the author asks for a refresh.
 // No YouTube API credentials, direct API calls or changes to channel settings.
 (() => {
-  const PREFIX = 'mbStudioSummary:';
+  const PREFIX = 'mbStudioSummary:', EFFICIENCY = 'mbEfficiency:';
   const METRICS = ['ctr', 'duration', 'retention', 'likes', 'shares'];
   const queue = [];
   const pending = new Set();
@@ -11,15 +11,40 @@
     try {
       const u = new URL(value);
       return u.origin === 'https://studio.youtube.com' &&
-        u.pathname.startsWith(`/channel/${channelId}/analytics/tab-`) && value.length < 8000;
+        u.pathname.startsWith(`/channel/${channelId}/analytics/hub_`) && value.length < 8000;
     } catch { return false; }
   }
+  // «Эффективность» on the Content list: one lifetime per-video report of the channel.
+  function validateEfficiency(context, senderUrl) {
+    try {
+      return context && /^UC[\w-]{22}$/.test(context.channelId) && context.key === EFFICIENCY + context.channelId &&
+        context.range === 'lifetime' && context.period === 'lifetime' && validUrl(context.videosUrl, context.channelId) &&
+        new URL(context.videosUrl).searchParams.get('time_period') === 'lifetime' &&
+        new URL(senderUrl).origin === 'https://studio.youtube.com' &&
+        new URL(senderUrl).pathname.startsWith(`/channel/${context.channelId}/videos`);
+    } catch { return false; }
+  }
+  function cleanVideos(input) {
+    const result = {};
+    for (const [id, v] of Object.entries(input || {}).slice(0, 2000)) {
+      if (!/^[\w-]{11}$/.test(id) || !v || !Number.isInteger(v.views) || v.views < 0) continue;
+      const row = { views: v.views };
+      for (const k of ['ctr', 'avp', 'likes', 'shares'])
+        if (Number.isFinite(v[k]) && v[k] >= 0 && v[k] <= 10000) row[k] = v[k];
+      if (Number.isInteger(v.avd) && v.avd >= 0 && v.avd < 86400) row.avd = v.avd;
+      result[id] = row;
+    }
+    return result;
+  }
   function validate(context, senderUrl) {
+    if (context?.key?.startsWith?.(EFFICIENCY)) return validateEfficiency(context, senderUrl);
     return context && /^UC[\w-]{22}$/.test(context.channelId) &&
       typeof context.key === 'string' && context.key.startsWith(PREFIX + context.channelId + ':') && context.key.length < 600 &&
       typeof context.range === 'string' && context.range.length < 200 &&
+      ['week', '4_weeks', 'quarter'].includes(context.period) &&
       validUrl(senderUrl, context.channelId) &&
-      ['overviewUrl', 'contentUrl', 'likesUrl', 'sharesUrl'].every(k => validUrl(context[k], context.channelId));
+      ['contentUrl', 'exploreUrl'].every(k => validUrl(context[k], context.channelId)) &&
+      new URL(context.exploreUrl).searchParams.get('time_period') === context.period;
   }
   function cleanMetrics(input, now) {
     const result = {};
@@ -111,21 +136,21 @@
     active = queue.shift();
     try { await next(); } catch { await finish('Не удалось прочитать отчёт Studio.'); }
   }
-  async function request(context, patch, sender, manualMode = '') {
+  async function request(context, patch, sender, manualModes = null) {
     if (!validate(context, sender.tab?.url)) throw Error('Неверный канал или адрес отчёта.');
     const record = await merge(context, patch);
     if (record.loading && !pending.has(context.key)) await merge(context, {}, { loading: false });
-    if (manualMode && !pending.has(context.key)) {
+    if (manualModes && !pending.has(context.key)) {
       if (queue.length >= 6) return { ok: false, error: 'Дождитесь завершения обновления других каналов.' };
       pending.add(context.key);
       await merge(context, {}, { loading: true, error: '' });
-      queue.push({ context, modes: [manualMode], tabId: null });
+      queue.push({ context, modes: [...manualModes], tabId: null });
       void pump();
     }
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, validUrl, validate };
+    module.exports = { cleanMetrics, cleanVideos, validUrl, validate };
     return;
   }
   const ready = (async () => {
@@ -139,11 +164,13 @@
     }
   })();
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
-    if (!['mbStudioSummaryGet', 'mbStudioSummaryRefreshLikes', 'mbStudioSummaryRefreshShares', 'mbStudioSummaryProbe', 'mbStudioSummaryResult'].includes(message?.type)) return;
+    if (!['mbStudioSummaryGet', 'mbStudioSummaryRefresh', 'mbEfficiencyGet', 'mbEfficiencyRefresh', 'mbStudioSummaryProbe', 'mbStudioSummaryResult'].includes(message?.type)) return;
     void ready.then(async () => {
       if (message.type === 'mbStudioSummaryGet') return request(message.context, message.metrics, sender);
-      if (message.type === 'mbStudioSummaryRefreshLikes') return request(message.context, {}, sender, 'likes');
-      if (message.type === 'mbStudioSummaryRefreshShares') return request(message.context, {}, sender, 'shares');
+      // One click refreshes everything: «Расширенный режим» (percentage viewed, likes, shares), then «Контент» (CTR, 0:30).
+      if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
+      if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['videos']);
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {
@@ -152,7 +179,13 @@
         return { ok: true, collector: { mode: job.mode, nonce: job.nonce, context: job.context } };
       }
       if (message.nonce !== job.nonce || message.range !== job.context.range) return { ok: false };
-      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : job.mode === 'overview' ? ['duration'] : [job.mode];
+      if (job.mode === 'videos') {
+        const videos = cleanVideos(message.videos);
+        if (Object.keys(videos).length) await merge(job.context, {}, { videos, videosAt: Date.now() });
+        await next();
+        return { ok: true };
+      }
+      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : ['duration', 'likes', 'shares'];
       const metrics = Object.fromEntries(allowed.filter(k => message.metrics?.[k]).map(k => [k, message.metrics[k]]));
       await merge(job.context, metrics);
       await next();

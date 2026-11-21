@@ -1124,7 +1124,7 @@ ytmOnEl.addEventListener("change", () => {
 });
 
 // «Аналитика канала» включает и выключает табличку средних показателей
-// рядом с заголовком «Аналитика по каналу» в YouTube Studio
+// рядом с заголовком страниц «Инсайты» в YouTube Studio
 // (yt-studio-summary.js). По умолчанию включено, как и было до появления
 // переключателя.
 const ytsOnEl = document.getElementById("ytsOn");
@@ -1133,6 +1133,15 @@ chrome.storage.local.get(["ytsOn"], (r) => {
 });
 ytsOnEl.addEventListener("change", () => {
   chrome.storage.local.set({ ytsOn: ytsOnEl.checked });
+});
+// «Эффективность контента»: колонка оценки 0–100 в списке роликов «Контент»
+// (yt-studio-efficiency.js). По умолчанию включено.
+const ytsEffEl = document.getElementById("ytsEff");
+chrome.storage.local.get(["ytsEff"], (r) => {
+  ytsEffEl.checked = (r || {}).ytsEff !== false;
+});
+ytsEffEl.addEventListener("change", () => {
+  chrome.storage.local.set({ ytsEff: ytsEffEl.checked });
 });
 
 
