@@ -14,25 +14,27 @@
         u.pathname.startsWith(`/channel/${channelId}/analytics/hub_`) && value.length < 8000;
     } catch { return false; }
   }
-  // «Эффективность» on the Content list: one lifetime per-video report of the channel.
+  // «Эффективность» on the Content list: the first 48 hours of the listed videos, one day-by-day report each.
   function validateEfficiency(context, senderUrl) {
     try {
       return context && /^UC[\w-]{22}$/.test(context.channelId) && context.key === EFFICIENCY + context.channelId &&
-        context.range === 'lifetime' && context.period === 'lifetime' && validUrl(context.videosUrl, context.channelId) &&
-        new URL(context.videosUrl).searchParams.get('time_period') === 'lifetime' &&
+        context.range === 'early' && context.period === 'early' && validUrl(context.earlyUrl, context.channelId) &&
+        Array.isArray(context.ids) && context.ids.length <= 60 && context.ids.every(id => /^[\w-]{11}$/.test(id)) &&
         new URL(senderUrl).origin === 'https://studio.youtube.com' &&
         new URL(senderUrl).pathname.startsWith(`/channel/${context.channelId}/videos`);
     } catch { return false; }
   }
-  function cleanVideos(input) {
+  function cleanEarly(input, ids) {
     const result = {};
-    for (const [id, v] of Object.entries(input || {}).slice(0, 2000)) {
-      if (!/^[\w-]{11}$/.test(id) || !v || !Number.isInteger(v.views) || v.views < 0) continue;
-      const row = { views: v.views };
-      for (const k of ['ctr', 'avp', 'shares'])
-        if (Number.isFinite(v[k]) && v[k] >= 0 && v[k] <= 10000) row[k] = v[k];
-      if (Number.isInteger(v.avd) && v.avd >= 0 && v.avd < 86400) row.avd = v.avd;
-      result[id] = row;
+    for (const id of ids || []) {
+      const e = input?.[id];
+      if (!e || !Number.isInteger(e.days) || e.days < 1 || e.days > 2) continue;
+      const row = { days: e.days };
+      if (typeof e.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(e.date)) row.date = e.date;
+      for (const k of ['views', 'impr', 'subs']) if (Number.isFinite(e[k]) && Math.abs(e[k]) < 1e9) row[k] = e[k];
+      if (Number.isFinite(e.ctr) && e.ctr >= 0 && e.ctr <= 100) row.ctr = e.ctr;
+      if (Number.isFinite(e.avd) && e.avd >= 0 && e.avd < 86400) row.avd = e.avd;
+      if (Number.isFinite(row.views) && row.views >= 0) result[id] = row;
     }
     return result;
   }
@@ -85,7 +87,9 @@
       const record = saved?.channelId === context.channelId ? saved :
         { channelId: context.channelId, range: context.range, metrics: {} };
       record.metrics = { ...record.metrics, ...cleanMetrics(metrics, Date.now()) };
-      Object.assign(record, extra);
+      const { early, ...rest } = extra;
+      if (early) record.early = { ...record.early, ...early };
+      Object.assign(record, rest);
       await chrome.storage.local.set({ [context.key]: record });
       return record;
     });
@@ -119,7 +123,7 @@
       tabId: job.tabId, channelId: job.context.channelId, started: Date.now(), url } });
     job.timer = setTimeout(() => {
       if (active === job) { job.timedOut = true; void next().catch(() => finish('Не все отчёты успели загрузиться.')); }
-    }, 45000);
+    }, job.mode === 'early' ? 30000 + 15000 * job.context.ids.length : 45000);
     if (job.tabId) await chrome.tabs.update(job.tabId, { url });
     else {
       const tab = await chrome.tabs.create({ url, active: false });
@@ -150,7 +154,7 @@
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, cleanVideos, validUrl, validate };
+    module.exports = { cleanMetrics, cleanEarly, validUrl, validate };
     return;
   }
   const ready = (async () => {
@@ -170,7 +174,7 @@
       // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
-      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['videos']);
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['early']);
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {
@@ -179,9 +183,9 @@
         return { ok: true, collector: { mode: job.mode, nonce: job.nonce, context: job.context } };
       }
       if (message.nonce !== job.nonce || message.range !== job.context.range) return { ok: false };
-      if (job.mode === 'videos') {
-        const videos = cleanVideos(message.videos);
-        if (Object.keys(videos).length) await merge(job.context, {}, { videos, videosAt: Date.now() });
+      if (job.mode === 'early') {
+        const early = cleanEarly(message.early, job.context.ids);
+        if (Object.keys(early).length) await merge(job.context, {}, { early, earlyAt: Date.now() });
         await next();
         return { ok: true };
       }

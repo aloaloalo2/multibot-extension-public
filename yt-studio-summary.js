@@ -85,28 +85,6 @@
     }
     return metrics;
   }
-  // The same report per video for «Эффективность» on the Content list: {videoId: {views, ctr, avp, avd, shares}}.
-  function exploreVideos(doc, rawUrl) {
-    const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics'), n = name => columns.indexOf(name);
-    const root = doc.querySelector('#debug-explore-table');
-    if (n('EXTERNAL_VIEWS') < 0 || u.searchParams.get('dimension') !== 'VIDEO' || !root || !visible(root)) return {};
-    const videos = {};
-    for (const row of root.querySelectorAll('yta-explore-table-row')) {
-      const id = (row.querySelector('img')?.getAttribute('src') || '').match(/\/vi(?:_webp)?\/([\w-]{11})\//)?.[1];
-      const cells = [...row.querySelectorAll('.debug-metric-value')].map(text);
-      if (!id || cells.length !== columns.length) continue;
-      const views = count(cells[n('EXTERNAL_VIEWS')]);
-      if (views === null) continue;
-      const video = { views }, pct = name => n(name) < 0 ? null : percentage(cells[n(name)]);
-      const time = n('AVERAGE_WATCH_TIME') < 0 ? null : seconds(cells[n('AVERAGE_WATCH_TIME')]);
-      if (time !== null) video.avd = time;
-      const per = name => { const v = n(name) < 0 ? null : count(cells[n(name)]); return v === null || !views ? null : v / views * 100; };
-      for (const [k, v] of [['ctr', pct('VIDEO_THUMBNAIL_IMPRESSIONS_VTR')], ['avp', pct('AVERAGE_WATCH_PERCENTAGE')], ['shares', per('SHARINGS')]])
-        if (v !== null) video[k] = v;
-      videos[id] = video;
-    }
-    return videos;
-  }
   function readMetrics(doc, rawUrl, mode) {
     return mode === 'explore' ? exploreMetrics(doc, rawUrl) : mode === 'content' ? contentMetrics(doc) : {};
   }
@@ -154,7 +132,7 @@
     return { channelId, range, period: PERIODS[days], key: `mbStudioSummary:${channelId}:${hash('insights|' + PERIODS[days])}`,
       contentUrl: base + 'hub_content', exploreUrl: explore.href };
   }
-  function render(doc, ctx, record, onRefresh) {
+  function render(doc, ctx, record, onRefresh, effRecord) {
     const row = titleRow(doc);
     if (!row) return;
     let table = doc.querySelector(`[${ROOT}]`);
@@ -174,7 +152,7 @@
     table.dataset.channel = ctx.channelId;
     const one = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     const two = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-    const efficiency = channelScore(record);
+    const efficiency = channelScore(effRecord, { week: 7, '4_weeks': 28, quarter: 90 }[ctx.period]);
     for (const name of NAMES) {
       const cell = table.querySelector(`[data-metric="${name}"]`), metric = record?.metrics?.[name];
       const ok = name === 'score' ? !!efficiency : metric && Number.isFinite(metric.value);
@@ -191,24 +169,29 @@
       if (span.textContent !== labelText) span.textContent = labelText;
       button.disabled = !!record?.loading;
       button.setAttribute('aria-label', record?.loading ? `Обновление: ${FULL_LABELS[NAMES.indexOf(name)]}` : 'Обновить показатели канала');
-      const about = name === 'score' ? (ok ? efficiency.explain + '\n' : 'Нужно минимум два показателя.\n') : ok ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : 'Период: ' + ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}\n` : '';
+      const about = name === 'score' ? (ok ? efficiency.explain + '\n' : 'Нет роликов этого периода с прочитанными первыми 48 часами: нажмите ↻ в колонке «Эффективность» на странице «Контент».\n') : ok ? `${metric.source}\n${name === 'retention' ? 'Источник: блок удержания Studio.' : 'Период: ' + ctx.range}\nОбновлено: ${new Date(metric.at).toLocaleString('ru-RU')}\n` : '';
       button.title = record?.loading ? 'Загружаем отчёты этого канала.' : `${about}${record?.error ? record.error + '\n' : ''}Обновить все показатели из отчётов текущего канала.`;
       button.onclick = () => onRefresh?.(ctx);
     }
   }
-  // The channel's averages on the Content list scale (yt-studio-efficiency.js, loaded in the same content-script world).
-  function channelScore(record) {
+  // The channel's «Эффективность»: the mean score of its videos released in the selected period, on the Content list
+  // scale (yt-studio-efficiency.js, loaded in the same content-script world; its first-48-hours data).
+  function channelScore(effRecord, days, now = Date.now()) {
     const scale = globalThis.__mbEfficiency || (typeof require === 'function' ? require('./yt-studio-efficiency.js') : null);
-    const m = record?.metrics || {}, v = name => Number.isFinite(m[name]?.value) ? m[name].value : undefined;
-    const result = scale?.score({ views: Infinity, ctr: v('ctr'), avp: v('duration'), avd: v('avd'), shares: v('shares') });
-    return result ? { value: result.value, explain: scale.explain(result) } : null;
+    if (!scale || !days || !effRecord?.early) return null;
+    const all = scale.scores(effRecord.early), since = now - days * 86400000;
+    const inside = Object.entries(all).filter(([id, s]) => !s.partial && effRecord.early[id]?.date && Date.parse(effRecord.early[id].date) >= since);
+    if (!inside.length) return null;
+    const value = Math.round(inside.reduce((a, [, s]) => a + s.value, 0) / inside.length);
+    const sorted = inside.map(([, s]) => s.value).sort((a, b) => b - a);
+    return { value, explain: `Среднее по ${inside.length} роликам, вышедшим за ${days} дней (лучший ${sorted[0]}, слабейший ${sorted.at(-1)}).` };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { channelScore, percentage, count, average, contentMetrics, exploreMetrics, exploreVideos, readMetrics, context, dateRange, render, PERIODS };
+    module.exports = { channelScore, percentage, count, average, contentMetrics, exploreMetrics, readMetrics, context, dateRange, render, PERIODS };
     return;
   }
   globalThis.__mbStudioSummaryCleanup?.();
-  let timer, collectorTimer, refreshTimer, current = null, record = null, lastRequest = '', lastRequestAt = 0, lastKey = '', keySince = 0;
+  let effRecord = null, timer, collectorTimer, refreshTimer, current = null, record = null, lastRequest = '', lastRequestAt = 0, lastKey = '', keySince = 0;
   // Переключатель «Аналитика канала» в попапе (ключ ytsOn, по умолчанию
   // включён). Выключен — таблички нет и запросов в фон за данными тоже нет.
   let enabled = true;
@@ -241,8 +224,11 @@
     if (document.hidden) return;
     const ctx = context(document, location.href);
     if (!ctx) { document.querySelector(`[${ROOT}]`)?.remove(); current = null; return; }
-    if (ctx.key !== lastKey) { lastKey = ctx.key; keySince = Date.now(); current = ctx; record = null; lastRequest = ''; }
-    render(document, ctx, record, refresh);
+    if (ctx.key !== lastKey) {
+      lastKey = ctx.key; keySince = Date.now(); current = ctx; record = null; lastRequest = ''; effRecord = null;
+      try { effRecord = (await chrome.storage.local.get('mbEfficiency:' + ctx.channelId))['mbEfficiency:' + ctx.channelId] || null; } catch {}
+    }
+    render(document, ctx, record, refresh, effRecord);
     if (Date.now() - keySince < 800) { schedule(); return; }
     // On «Контент» the visible CTR and retention are saved while the author looks at them.
     const metrics = /\/hub_content\/?$/.test(location.pathname) ? contentMetrics(document) : {};
@@ -252,14 +238,14 @@
     try {
       const reply = await send({ type: 'mbStudioSummaryGet', context: ctx, metrics });
       if (current?.key !== ctx.key) return;
-      if (reply?.ok) { record = reply.record; render(document, ctx, record, refresh); }
+      if (reply?.ok) { record = reply.record; render(document, ctx, record, refresh, effRecord); }
     } catch { /* Reloaded extension: the next page load reconnects. */ }
   }
   async function refresh(requested) {
     const ctx = context(document, location.href);
     if (!ctx || ctx.key !== requested.key || current?.key !== ctx.key || record?.loading) return;
     record = { ...record, loading: true, error: '' };
-    render(document, ctx, record, refresh);
+    render(document, ctx, record, refresh, effRecord);
     try {
       const reply = await send({ type: 'mbStudioSummaryRefresh', context: ctx });
       if (current?.key !== ctx.key) return;
@@ -268,7 +254,7 @@
       if (current?.key !== ctx.key) return;
       record = { ...record, loading: false, error: 'Перезагрузите страницу после обновления расширения.' };
     }
-    render(document, ctx, record, refresh);
+    render(document, ctx, record, refresh, effRecord);
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(() => void update(), 250); }
   const changed = (changes, area) => {
@@ -278,15 +264,41 @@
       return;
     }
     if (!enabled) return;
+    if (area === 'local' && current && changes['mbEfficiency:' + current.channelId]) {
+      effRecord = changes['mbEfficiency:' + current.channelId].newValue || null;
+      render(document, current, record, refresh, effRecord);
+    }
     if (area === 'local' && current && changes[current.key]) {
       record = changes[current.key].newValue;
-      render(document, current, record, refresh);
+      render(document, current, record, refresh, effRecord);
     }
   };
   const observer = new MutationObserver(mutations => {
     if (mutations.some(m => !m.target.parentElement?.closest(`[${ROOT}]`) && !m.target.closest?.(`[${ROOT}]`))) schedule();
   });
   // A background report tab: read it (choosing the requested period on «Контент») and hand the values back.
+  // «Эффективность»: each listed video's day-by-day report opens in a frame of this background tab, one at a time
+  // (a frame per video, removed after reading: a reused frame grew until the tab crashed), and its first two days
+  // are kept.
+  async function collectEarly(job) {
+    const scale = globalThis.__mbEfficiency, early = {};
+    for (const id of job.context.ids) {
+      const frame = document.createElement('iframe');
+      frame.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:800px;opacity:0;pointer-events:none;z-index:-1';
+      frame.src = scale.dayUrl(job.context.channelId, id);
+      document.body.append(frame);
+      let rows = null;
+      for (let t = 0; t < 40 && !rows?.length; t++) {
+        await new Promise(r => setTimeout(r, 500));
+        try { if (frame.contentDocument?.location.href.includes(id)) rows = scale.readDays(frame.contentDocument); } catch {}
+      }
+      if (rows?.length) { await new Promise(r => setTimeout(r, 1500)); try { rows = scale.readDays(frame.contentDocument) || rows; } catch {} }
+      frame.src = 'about:blank'; await new Promise(r => setTimeout(r, 200)); frame.remove();
+      const e = scale.early(rows);
+      if (e) early[id] = e;
+    }
+    try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, early }); } catch {}
+  }
   function collect(job) {
     const started = Date.now();
     let stable = '', repeats = 0, finished = false, clickedAt = 0;
@@ -294,6 +306,7 @@
       if (finished) return;
       const home = document.querySelector('#home-button')?.getAttribute('href') || '';
       if (!home.includes('/channel/' + job.context.channelId)) return;
+      if (job.mode === 'early') { finished = true; clearInterval(collectorTimer); void collectEarly(job); return; }
       if (job.mode === 'content') {
         const chips = periodChips(document), active = chips.find(c => c.querySelector('.ytChipShapeActive'));
         if (!chips.length) return;
@@ -302,14 +315,6 @@
           return;
         }
       } else if (new URL(location.href).searchParams.get('time_period') !== job.context.period) return;
-      if (job.mode === 'videos') {
-        const videos = exploreVideos(document, location.href), signature = JSON.stringify(videos);
-        repeats = signature === stable ? repeats + 1 : 0; stable = signature;
-        if ((!Object.keys(videos).length && Date.now() - started < 20000) || repeats < 2) return;
-        finished = true; clearInterval(collectorTimer);
-        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, videos }); } catch {}
-        return;
-      }
       const metrics = readMetrics(document, location.href, job.mode), signature = JSON.stringify(metrics);
       repeats = signature === stable ? repeats + 1 : 0; stable = signature;
       const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!(metrics.duration && metrics.avd && metrics.shares);
