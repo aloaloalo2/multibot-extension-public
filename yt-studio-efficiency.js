@@ -14,7 +14,8 @@
     ['Длина одного просмотра', 'avd', (v, o) => o.maxAvd > 0 ? v / o.maxAvd * 100 : null],
     // Lenient and saturating: 10% of views liking a video is 80 points (author, 22 November 2026).
     ['Лайки / просмотры', 'likes', v => 100 * (1 - Math.exp(-v / 6.2))],
-    ['Поделились / просмотры', 'shares', linear(0.1, 1.5)],
+    // Lenient like the likes: shares are rare, 1% of views sharing is 70 points (author, 22 November 2026).
+    ['Поделились / просмотры', 'shares', v => 100 * (1 - Math.exp(-v / 0.83))],
   ];
   const MIN_VIEWS = 100;
   // The longest average view among the channel's videos with enough views.
