@@ -6,16 +6,19 @@ const {cleanVideos,validate}=require('../yt-studio-summary-worker.js');
 const channel='UCDY_f7aDjp-E7ao-dyK4_Tg';
 const shown={closest:()=>null,getClientRects:()=>[{}]};
 const node=textContent=>({textContent,...shown});
-test('score is the mean of capped benchmark points and ignores views',()=>{
-  assert.equal(score({views:100,ctr:10,avp:60,avd:480,likes:6,shares:1.5}).value,100);
-  assert.equal(explain(score({views:100,ctr:6,avd:200})),'CTR: 6% → 90\nДлина одного просмотра: 3:20 → 33');
-  assert.equal(score({views:100,ctr:1.5,avp:20,avd:60,likes:1,shares:0.1}).value,0);
-  assert.equal(score({views:100,ctr:4,avp:40,avd:270,likes:3.5,shares:0.8}).value,50);
-  assert.equal(score({views:1e6,ctr:4,avp:40,avd:270,likes:3.5,shares:0.8}).value,50);
-  assert.equal(score({views:100,ctr:30,avp:0}).value,50);
-  assert.equal(score({views:100,ctr:4.5,avp:60}).parts[0].points,60);
-  assert.equal(score({views:100,ctr:6}),null);
-  assert.equal(score({views:99,ctr:6,avp:40}),null);
+test('score is the mean of capped points and ignores views; view length is relative to the channel',()=>{
+  const {longest}=require('../yt-studio-efficiency.js');
+  const o={maxAvd:600};
+  assert.equal(score({views:100,ctr:6.5,avp:60,avd:600,likes:1000,shares:1.5},o).value,100);
+  assert.equal(score({views:100,ctr:1.5,avp:20,avd:0,likes:0,shares:0.1},o).value,0);
+  assert.equal(score({views:100,ctr:4.5,avd:300},o).value,55);
+  assert.equal(score({views:1e6,ctr:4.5,avd:300},o).value,55);
+  assert.equal(explain(score({views:100,ctr:4.5,avd:200},o)),'CTR: 4,5% → 60\nДлина одного просмотра: 3:20 → 33');
+  assert.equal(Math.round(score({views:100,ctr:4.5,likes:10}).parts[1].points),80);
+  assert.equal(score({views:100,ctr:4.5,avd:300}),null);
+  assert.equal(score({views:99,ctr:6,avp:40},o),null);
+  assert.equal(longest({a:{views:100,avd:300},b:{views:99,avd:900},c:{views:500,avd:420},d:{views:500}}),420);
+  assert.equal(longest(null),0);
 });
 test('the lifetime report rows become per-video values keyed by the thumbnail id',()=>{
   const url=exploreUrl(channel);

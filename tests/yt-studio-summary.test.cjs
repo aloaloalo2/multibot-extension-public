@@ -169,7 +169,7 @@ test('the Insights table scores the channel on the Content list scale from its o
   const {channelScore,exploreMetrics:em}=require('../yt-studio-summary.js');
   const at=1,m=value=>({value,count:3,at});
   const r=channelScore({metrics:{ctr:m(4.5),duration:m(40),avd:m(270),likes:m(3.5),shares:m(0.8),retention:m(99)}});
-  assert.equal(r.value,52);assert.match(r.explain,/^CTR: 4,5% → 60\n/);assert.match(r.explain,/Длина одного просмотра: 4:30 → 50/);
+  assert.equal(r.value,51);assert.match(r.explain,/^CTR: 4,5% → 60\n/);assert.doesNotMatch(r.explain,/Длина/);
   assert.equal(channelScore({metrics:{ctr:m(4.5)}}),null);assert.equal(channelScore(null),null);
   const cols=['EXTERNAL_VIEWS','AVERAGE_WATCH_TIME'],u=`https://studio.youtube.com/channel/${channel}/analytics/hub_content/explore?dimension=VIDEO&${cols.map(c=>'t_metrics='+c).join('&')}`;
   assert.equal(em(report([['A','10','3:00'],['B','10','1:05:00'],['C','0','9:00']]),u).avd.value,(180+3900)/2);

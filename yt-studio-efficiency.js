@@ -3,19 +3,29 @@
 // equal weights (author's choice, 21 November 2026). The report is read only when the author presses ↻.
 (() => {
   const ROOT = 'data-multibot-efficiency';
-  // [name, field, «poor» value = 0 points, «excellent» value = 100 points]: percent, or seconds for the duration.
+  // Each measure gives 0–100 points; the score is their mean. Views do not count.
+  const linear = (low, high) => v => (v - low) / (high - low) * 100;
   const BENCHMARKS = [
-    ['CTR', 'ctr', 1.5, 6.5],   // 4,5% is already above average: 60 points (author, 21 November 2026)
-    ['Средний % просмотра', 'avp', 20, 60],
-    ['Длина одного просмотра', 'avd', 60, 480],
-    ['Лайки / просмотры', 'likes', 1, 6],
-    ['Поделились / просмотры', 'shares', 0.1, 1.5],
+    // 4,5% is already above average: 60 points (author, 21 November 2026)
+    ['CTR', 'ctr', linear(1.5, 6.5)],
+    ['Средний % просмотра', 'avp', linear(20, 60)],
+    // Relative to the channel: its longest average view gets 100, the others their share of it (author, 22 November
+    // 2026: fixed minutes gave every long video 100). Without the channel's videos (the Insights table) it is left out.
+    ['Длина одного просмотра', 'avd', (v, o) => o.maxAvd > 0 ? v / o.maxAvd * 100 : null],
+    // Lenient and saturating: 10% of views liking a video is 80 points (author, 22 November 2026).
+    ['Лайки / просмотры', 'likes', v => 100 * (1 - Math.exp(-v / 6.2))],
+    ['Поделились / просмотры', 'shares', linear(0.1, 1.5)],
   ];
   const MIN_VIEWS = 100;
-  function score(video) {
+  // The longest average view among the channel's videos with enough views.
+  function longest(videos) {
+    return Math.max(0, ...Object.values(videos || {}).filter(v => v.views >= MIN_VIEWS && Number.isFinite(v.avd)).map(v => v.avd));
+  }
+  function score(video, options = {}) {
     if (!video || !(video.views >= MIN_VIEWS)) return null;
     const parts = BENCHMARKS.filter(([, k]) => Number.isFinite(video[k]))
-      .map(([label, k, low, high]) => ({ label, key: k, value: video[k], points: Math.max(0, Math.min(100, (video[k] - low) / (high - low) * 100)) }));
+      .map(([label, k, points]) => ({ label, key: k, value: video[k], points: points(video[k], options) }))
+      .filter(p => Number.isFinite(p.points)).map(p => ({ ...p, points: Math.max(0, Math.min(100, p.points)) }));
     if (parts.length < 2) return null;
     return { value: Math.round(parts.reduce((a, p) => a + p.points, 0) / parts.length), parts };
   }
@@ -42,7 +52,7 @@
   function explain(result) {
     return result.parts.map(p => `${p.label}: ${p.key === 'avd' ? clock(p.value) : fmt(p.value)} → ${Math.round(p.points)}`).join('\n');
   }
-  if (typeof module === 'object' && module.exports) { module.exports = { score, context, exploreUrl, explain, BENCHMARKS }; return; }
+  if (typeof module === 'object' && module.exports) { module.exports = { score, longest, context, exploreUrl, explain, BENCHMARKS }; return; }
 
   globalThis.__mbEfficiency = { score, explain };   // the Insights table scores the channel on this scale
   globalThis.__mbEfficiencyCleanup?.();
@@ -80,6 +90,7 @@
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
+    const maxAvd = longest(record?.videos);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
@@ -87,7 +98,7 @@
       if (!cell) { cell = document.createElement('div'); cell.setAttribute(ROOT, 'cell'); cell.className = 'cell-body'; cell.append(document.createElement('b')); }
       if (cell.previousElementSibling !== last) last.after(cell);
       const id = [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
-      const video = record?.videos?.[id], result = score(video), b = cell.firstChild;
+      const video = record?.videos?.[id], result = score(video, { maxAvd }), b = cell.firstChild;
       const label = result ? String(result.value) : '—';
       if (b.textContent !== label) b.textContent = label;
       const [bg, fg] = result ? color(result.value) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
