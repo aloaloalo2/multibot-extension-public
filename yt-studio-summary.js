@@ -277,28 +277,6 @@
     if (mutations.some(m => !m.target.parentElement?.closest(`[${ROOT}]`) && !m.target.closest?.(`[${ROOT}]`))) schedule();
   });
   // A background report tab: read it (choosing the requested period on «Контент») and hand the values back.
-  // «Эффективность»: each listed video's day-by-day report opens in a frame of this background tab, one at a time
-  // (a frame per video, removed after reading: a reused frame grew until the tab crashed), and its first two days
-  // are kept.
-  async function collectEarly(job) {
-    const scale = globalThis.__mbEfficiency, early = {};
-    for (const id of job.context.ids) {
-      const frame = document.createElement('iframe');
-      frame.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:800px;opacity:0;pointer-events:none;z-index:-1';
-      frame.src = scale.dayUrl(job.context.channelId, id);
-      document.body.append(frame);
-      let rows = null;
-      for (let t = 0; t < 40 && !rows?.length; t++) {
-        await new Promise(r => setTimeout(r, 500));
-        try { if (frame.contentDocument?.location.href.includes(id)) rows = scale.readDays(frame.contentDocument); } catch {}
-      }
-      if (rows?.length) { await new Promise(r => setTimeout(r, 1500)); try { rows = scale.readDays(frame.contentDocument) || rows; } catch {} }
-      frame.src = 'about:blank'; await new Promise(r => setTimeout(r, 200)); frame.remove();
-      const e = scale.early(rows);
-      if (e) early[id] = e;
-    }
-    try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, early }); } catch {}
-  }
   function collect(job) {
     const started = Date.now();
     let stable = '', repeats = 0, finished = false, clickedAt = 0;
@@ -306,7 +284,16 @@
       if (finished) return;
       const home = document.querySelector('#home-button')?.getAttribute('href') || '';
       if (!home.includes('/channel/' + job.context.channelId)) return;
-      if (job.mode === 'early') { finished = true; clearInterval(collectorTimer); void collectEarly(job); return; }
+      if (job.mode.startsWith('early:')) {
+        // «Эффективность»: this tab shows one video's day-by-day report; its first two days are kept.
+        const scale = globalThis.__mbEfficiency, rows = scale?.readDays(document), signature = JSON.stringify(rows);
+        repeats = signature === stable ? repeats + 1 : 0; stable = signature;
+        if ((!rows?.length && Date.now() - started < 20000) || (rows?.length && repeats < 2)) return;
+        finished = true; clearInterval(collectorTimer);
+        const e = scale?.early(rows), id = job.mode.slice(6);
+        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, early: e ? { [id]: e } : {} }); } catch {}
+        return;
+      }
       if (job.mode === 'content') {
         const chips = periodChips(document), active = chips.find(c => c.querySelector('.ytChipShapeActive'));
         if (!chips.length) return;

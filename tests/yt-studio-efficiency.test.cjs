@@ -59,3 +59,25 @@ test('the Insights channel score is the mean of the scores of videos released in
   assert.equal(channelScore(rec,90,now).explain.match(/(\d+) роликам/)[1],'3');
   assert.equal(channelScore({early:{}},7,now),null);assert.equal(channelScore(null,7,now),null);
 });
+test('one refresh walks the collector tab through each listed video report and keeps their first two days',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm');
+  const local={},session={},listeners=[],created=[],updated=[],closed=[],tabs=new Map();
+  const area=state=>({get:async key=>({[key]:structuredClone(state[key])}),set:async obj=>Object.assign(state,structuredClone(obj)),remove:async key=>delete state[key]});
+  const chrome={storage:{local:area(local),session:area(session)},runtime:{onMessage:{addListener:f=>listeners.push(f)}},
+    tabs:{create:async o=>{created.push(o);const t={id:801,...o};tabs.set(801,t);return t;},update:async(id,o)=>{updated.push(o);tabs.set(id,{id,...o});},remove:async id=>closed.push(id),get:async id=>tabs.get(id),onRemoved:{addListener(){}}},
+    debugger:{attach:async()=>{},sendCommand:async()=>{},detach:async()=>{},onDetach:{addListener(){}}}};
+  vm.runInContext(fs.readFileSync(require.resolve('../yt-studio-summary-worker.js'),'utf8'),vm.createContext({chrome,URL,Date,crypto:require('node:crypto').webcrypto,setTimeout:()=>1,clearTimeout(){},console}));
+  const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
+  const ctx={...eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}),ids:['WA8pO04HUwA','svFNQL7-4zo']};
+  const call=(m,id=9,url=page)=>new Promise(r=>listeners[0](m,{tab:{id,url}},r));
+  await call({type:'mbEfficiencyRefresh',context:ctx});await new Promise(setImmediate);
+  assert.equal(created[0].url,eff.dayUrl(channel,'WA8pO04HUwA'));
+  let probe=await call({type:'mbStudioSummaryProbe'},801,created[0].url);
+  assert.equal(probe.collector.mode,'early:WA8pO04HUwA');
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',early:{WA8pO04HUwA:{days:2,views:588,impr:4836,ctr:5.6,avd:215,subs:2},svFNQL7zzzz:{days:2,views:1}}},801,created[0].url);
+  assert.equal(updated[0].url,eff.dayUrl(channel,'svFNQL7-4zo'));
+  probe=await call({type:'mbStudioSummaryProbe'},801,updated[0].url);
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',early:{}},801,updated[0].url);
+  const rec=local['mbEfficiency:'+channel];
+  assert.deepEqual(Object.keys(rec.early),['WA8pO04HUwA']);assert.equal(rec.loading,false);assert.deepEqual(closed,[801]);
+});

@@ -24,6 +24,18 @@
         new URL(senderUrl).pathname.startsWith(`/channel/${context.channelId}/videos`);
     } catch { return false; }
   }
+  // One video's day-by-day report (the same address yt-studio-efficiency.js reads). A background tab is hidden, and a
+  // frame inside it never rendered its table (22 November 2026), so the collector tab opens each report itself.
+  function dayUrl(channelId, videoId) {
+    const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
+    for (const [k, v] of [['entity_type', 'VIDEO'], ['entity_id', videoId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
+      ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
+    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE']) u.searchParams.append('t_metrics', m);
+    u.searchParams.set('dimension', 'DAY');
+    u.searchParams.set('o_column', 'DAY');
+    u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_ASC');
+    return u.href;
+  }
   function cleanEarly(input, ids) {
     const result = {};
     for (const id of ids || []) {
@@ -117,13 +129,13 @@
     if (!job.modes.length) return finish(job.timedOut ? 'Не все отчёты успели загрузиться. Доступные показатели сохранены.' : '');
     job.mode = job.modes.shift();
     job.nonce = crypto.randomUUID();
-    const url = job.context[job.mode + 'Url'];
+    const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6)) : job.context[job.mode + 'Url'];
     job.url = url;
     await chrome.storage.session.set({ mbStudioSummaryCollector: {
       tabId: job.tabId, channelId: job.context.channelId, started: Date.now(), url } });
     job.timer = setTimeout(() => {
       if (active === job) { job.timedOut = true; void next().catch(() => finish('Не все отчёты успели загрузиться.')); }
-    }, job.mode === 'early' ? 30000 + 15000 * job.context.ids.length : 45000);
+    }, 45000);
     if (job.tabId) await chrome.tabs.update(job.tabId, { url });
     else {
       const tab = await chrome.tabs.create({ url, active: false });
@@ -154,7 +166,7 @@
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, cleanEarly, validUrl, validate };
+    module.exports = { cleanMetrics, cleanEarly, dayUrl, validUrl, validate };
     return;
   }
   const ready = (async () => {
@@ -174,7 +186,7 @@
       // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
-      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['early']);
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, message.context?.ids?.map?.(id => 'early:' + id));
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {
@@ -183,8 +195,8 @@
         return { ok: true, collector: { mode: job.mode, nonce: job.nonce, context: job.context } };
       }
       if (message.nonce !== job.nonce || message.range !== job.context.range) return { ok: false };
-      if (job.mode === 'early') {
-        const early = cleanEarly(message.early, job.context.ids);
+      if (job.mode.startsWith('early:')) {
+        const early = cleanEarly(message.early, [job.mode.slice(6)]);
         if (Object.keys(early).length) await merge(job.context, {}, { early, earlyAt: Date.now() });
         await next();
         return { ok: true };

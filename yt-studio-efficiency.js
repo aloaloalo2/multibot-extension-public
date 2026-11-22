@@ -112,7 +112,9 @@
     @keyframes mb-eff-spin{to{transform:rotate(360deg)}}
     @media(prefers-reduced-motion:reduce){[${ROOT}=head] button:disabled{animation:none}}`;
   const color = v => v >= 70 ? ['#1b5e20', '#c8e6c9'] : v >= 40 ? ['#5d4a00', '#ffe9a8'] : ['#6d1b1b', '#ffcdd2'];
+  // Videos of the page that have views (a scheduled or private video has no report to read).
   const pageIds = () => [...document.querySelectorAll('ytcp-video-row')]
+    .filter(row => (number(text(row.querySelector('.tablecell-views'))) || 0) > 0)
     .map(row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean)).filter(Boolean);
   function header() {
     const last = [...document.querySelectorAll('.cell-header[class*=tablecell-]')].filter(e => !e.closest('ytcp-video-row') && !e.hasAttribute(ROOT)).at(-1);
