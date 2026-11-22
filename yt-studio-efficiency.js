@@ -285,6 +285,8 @@
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
       row.querySelectorAll(`[${ROOT}=nowcell],[${ROOT}=reachcell]`).forEach(e => e.remove());
+      // A video still processing has no date, views or comments cells: a CTR cell there would sit under the wrong columns.
+      if (!row.querySelector('.tablecell-views')) { row.querySelector(`[${ROOT}=cell]`)?.remove(); continue; }
       let cell = last.parentElement.querySelector(`[${ROOT}=cell]`);
       if (!cell) {
         cell = document.createElement('div'); cell.setAttribute(ROOT, 'cell'); cell.className = 'cell-body';

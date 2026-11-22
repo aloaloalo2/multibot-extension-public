@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Multi Bot",
-  "version": "4.4",
+  "version": "4.5",
   "description": "Multi Bot: HeyGen, Google Flow, YouTube, Google Classroom.",
   "permissions": [
     "scripting",
