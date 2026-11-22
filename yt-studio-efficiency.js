@@ -164,7 +164,24 @@
     u.searchParams.set('time_period', recentRange(now));
     return u.href;
   }
-  const api = { sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  // «С показами»: for comparison with the quality-only score (author, 22 November 2026). Half is the quality score,
+  // half is how many impressions a day YouTube gave the video since publication, ranked among the videos given.
+  // Impressions are YouTube's decision to push the video, so this half partly follows reach.
+  function withReach(quality, videos, now = Date.now()) {
+    const known = videos.map(v => ({ ...v, days: Math.max(1, (now - Date.parse(v.date)) / 86400000) }))
+      .filter(v => quality[v.id] && Number.isFinite(v.impr) && v.days > 0 && v.date);
+    const rates = known.map(v => v.impr / v.days), result = {};
+    for (const v of known) {
+      const rate = v.impr / v.days, below = rates.filter(x => x < rate).length, equal = rates.filter(x => x === rate).length;
+      const points = rates.length < 2 ? 50 : (below + (equal - 1) / 2) / (rates.length - 1) * 100;
+      result[v.id] = { value: Math.round(0.5 * quality[v.id].value + 0.5 * points), quality: quality[v.id].value, rate, points };
+    }
+    return result;
+  }
+  function explainReach(r) {
+    return `Качество: ${r.quality} (вес 50%)\nПоказов YouTube в день: ${new Intl.NumberFormat('ru-RU').format(Math.round(r.rate))} → ${Math.round(r.points)} (вес 50%)`;
+  }
+  const api = { withReach, explainReach, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -175,10 +192,10 @@
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
   style.textContent = `[${ROOT}]{flex:0 0 150px!important;width:150px!important;min-width:150px!important;max-width:150px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
-    [${ROOT}=cell],[${ROOT}=nowcell]{align-items:flex-start!important;padding-top:12px!important}
-    [${ROOT}=nowhead],[${ROOT}=nowcell]{flex-basis:100px!important;width:100px!important;min-width:100px!important;max-width:100px!important}
-    [${ROOT}=nowhead]{align-items:center!important}
-    [${ROOT}=cell] b,[${ROOT}=nowcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
+    [${ROOT}=cell],[${ROOT}=nowcell],[${ROOT}=reachcell]{align-items:flex-start!important;padding-top:12px!important}
+    [${ROOT}=nowhead],[${ROOT}=nowcell],[${ROOT}=reachhead],[${ROOT}=reachcell]{flex-basis:100px!important;width:100px!important;min-width:100px!important;max-width:100px!important}
+    [${ROOT}=nowhead],[${ROOT}=reachhead]{align-items:center!important}
+    [${ROOT}=cell] b,[${ROOT}=nowcell] b,[${ROOT}=reachcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
     [${ROOT}=cell] b[data-partial]{opacity:.6}
     [${ROOT}=head]{align-items:center!important;gap:4px;white-space:nowrap}
     [${ROOT}=head] button{border:0;background:transparent;color:var(--yt-spec-text-secondary,#aaa);cursor:pointer;font-size:14px;line-height:14px;padding:2px}
@@ -202,9 +219,13 @@
       head.append(label, button);
     }
     if (head.previousElementSibling !== last) last.after(head);
+    let reachHead = head.parentElement.querySelector(`[${ROOT}=reachhead]`);
+    if (!reachHead) { reachHead = document.createElement('div'); reachHead.setAttribute(ROOT, 'reachhead'); reachHead.className = head.className; reachHead.textContent = 'С показами'; }
+    if (reachHead.previousElementSibling !== head) head.after(reachHead);
+    reachHead.title = 'Для сравнения: половина — «Эффективность» (качество), половина — сколько показов в день YouTube дал ролику с публикации, по сравнению с роликами этой страницы.';
     let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
     if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
-    if (nowHead.previousElementSibling !== head) head.after(nowHead);
+    if (nowHead.previousElementSibling !== reachHead) reachHead.after(nowHead);
     nowHead.title = `Те же показатели за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня), по сравнению с другими роликами канала.` +
       (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button');
@@ -227,15 +248,22 @@
       b.style.background = bg; b.style.color = fg;
     };
     const make = (kind) => { const c = document.createElement('div'); c.setAttribute(ROOT, kind); c.className = 'cell-body'; c.append(document.createElement('b')); return c; };
+    const idOf = row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
+    const page = [...document.querySelectorAll('ytcp-video-row')].map(row => ({ id: idOf(row), date: parseDate(text(row.querySelector('.tablecell-date'))) }))
+      .filter(v => v.id && v.date && record?.now?.[v.id]).map(v => ({ ...v, impr: record.now[v.id].impr }));
+    const reach = withReach(all, page);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
       const cell = last.parentElement.querySelector(`[${ROOT}=cell]`) || make('cell');
       if (cell.previousElementSibling !== last) last.after(cell);
+      const reachCell = cell.parentElement.querySelector(`[${ROOT}=reachcell]`) || make('reachcell');
+      if (reachCell.previousElementSibling !== cell) cell.after(reachCell);
       const nowCell = cell.parentElement.querySelector(`[${ROOT}=nowcell]`) || make('nowcell');
-      if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
-      const id = [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
-      paint(cell, all[id]); paint(nowCell, recent[id]);
+      if (nowCell.previousElementSibling !== reachCell) reachCell.after(nowCell);
+      const id = idOf(row);
+      paint(cell, all[id]); paint(reachCell, reach[id]); paint(nowCell, recent[id]);
+      reachCell.title = reach[id] ? explainReach(reach[id]) : all[id] ? 'Нет даты публикации в списке.' : 'Нет оценки качества.';
       cell.title = all[id] ? explainNow(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «Эффективность».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
       nowCell.title = recent[id] ? explainNow(recent[id], `${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «Эффективность».' :
         `За последние ${RECENT_DAYS} дня меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;

@@ -122,3 +122,11 @@ test('«Сейчас» covers the last 4 California days before yesterday, as St
   assert.equal(s.a.value,100);assert.equal(s.q,undefined);
   assert.equal(eff.explainNow(s.a,'4 дня'),'Секунд просмотра на показ (4 дня): 10 → 100\nПодписок на 1000 просмотров (4 дня): 40 → 100');
 });
+test('«С показами» is half quality, half impressions a day since publication ranked among the given videos',()=>{
+  const now=Date.parse('2026-11-22T12:00:00Z');
+  const q={a:{value:20},b:{value:80},c:{value:50}};
+  const r=eff.withReach(q,[{id:'a',date:'2026-11-12',impr:1000000},{id:'b',date:'2026-11-12',impr:1000},{id:'c',date:'2026-11-21',impr:5000},{id:'x',date:'2026-11-01',impr:9}],now);
+  assert.equal(r.a.value,Math.round(.5*20+.5*100));assert.equal(r.b.value,Math.round(.5*80));assert.equal(r.x,undefined);
+  assert.ok(Math.abs(r.c.rate-5000/1.5)<1e-6);
+  assert.match(eff.explainReach(r.a),/^Качество: 20 \(вес 50%\)\nПоказов YouTube в день: .* → 100 \(вес 50%\)$/);
+});
