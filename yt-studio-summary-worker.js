@@ -51,10 +51,10 @@
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
     return account(u, authuser);
   }
-  // The last 4 days with data (yt-studio-efficiency.js recentRange): Studio's daily data ends two days back.
+  // The last 2 days with data (yt-studio-efficiency.js recentRange): Studio's daily data ends two days back.
   function recentUrl(channelId, authuser, now = Date.now()) {
     const u = new URL(weekUrl(channelId, authuser));
-    u.searchParams.set('time_period', `${pacificMidnight(now, 5)},${pacificMidnight(now, 1)}`);
+    u.searchParams.set('time_period', `${pacificMidnight(now, 3)},${pacificMidnight(now, 1)}`);
     return u.href;
   }
   function pacificMidnight(now, daysBack) {

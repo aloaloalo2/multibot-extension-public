@@ -104,10 +104,10 @@ test('the score ranks CTR (70%), subscribers per 1000 views (20%) and view lengt
   const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
   assert.deepEqual(eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7','30,5 %','12'])]})}),{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7,avp:30.5,shares:12}});
 });
-test('«Сейчас» covers the last 4 California days before yesterday, as Studio counts its days',()=>{
+test('«CTR 48ч» covers the last 2 California days before yesterday, as Studio counts its days',()=>{
   const r=eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(Number);
-  assert.deepEqual(r.map(x=>new Date(x).toISOString()),['2026-11-17T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
-  assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-05T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
+  assert.deepEqual(r.map(x=>new Date(x).toISOString()),['2026-11-19T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
+  assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-07T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
   const s=eff.nowScores({a:{views:25,impr:900,ctr:5,avd:200,subs:1},b:{views:25,impr:900,ctr:3,avd:100,subs:0},q:{views:10,impr:300,ctr:9,avd:900,subs:5}},eff.MIN_RECENT_VIEWS);
   assert.equal(s.a.value,100);assert.equal(s.q,undefined);
   assert.match(eff.explainNow(s.a,'4 дня'),/^CTR \(4 дня\): 5% → 100, вес 70%\n/);

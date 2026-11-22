@@ -190,7 +190,7 @@
   // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
   // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
   // `time_period=<start ms>,<end ms>`.
-  const RECENT_DAYS = 4, MIN_RECENT_VIEWS = 20;
+  const RECENT_DAYS = 2, MIN_RECENT_VIEWS = 20;   // «CTR 48ч»: the last two days with data (author, 22 November 2026)
   function pacificMidnight(now, daysBack) {
     // Studio's days start at midnight in California (08:00 UTC in winter, 07:00 in summer).
     const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(now)).split('-').map(Number);
@@ -235,7 +235,7 @@
   const style = document.createElement('style');
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
-  style.textContent = `[${ROOT}]{flex:0 0 90px!important;width:90px!important;min-width:90px!important;max-width:90px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
+  style.textContent = `[${ROOT}]{flex:0 0 120px!important;width:120px!important;min-width:120px!important;max-width:120px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
     [${ROOT}=cell],[${ROOT}=nowcell],[${ROOT}=reachcell]{align-items:flex-start!important;padding-top:12px!important}
     [${ROOT}=nowhead],[${ROOT}=nowcell],[${ROOT}=reachhead],[${ROOT}=reachcell]{flex-basis:110px!important;width:110px!important;min-width:110px!important;max-width:110px!important}
     [${ROOT}=nowhead],[${ROOT}=reachhead]{align-items:center!important}
@@ -257,7 +257,7 @@
     let head = last.parentElement.querySelector(`[${ROOT}=head]`);
     if (!head) {
       head = document.createElement('div'); head.setAttribute(ROOT, 'head'); head.className = last.className.replace(/tablecell-\S+/g, '').trim();
-      const label = document.createElement('span'); label.textContent = 'CTR';
+      const label = document.createElement('span'); label.textContent = 'CTR (все)';
       const button = document.createElement('button'); button.type = 'button'; button.textContent = '↻';
       button.onclick = () => void refresh();
       head.append(label, button);
@@ -265,9 +265,9 @@
     if (head.previousElementSibling !== last) last.after(head);
     head.parentElement.querySelector(`[${ROOT}=reachhead]`)?.remove();
     let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
-    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'CTR сейчас'; }
+    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'CTR 48ч'; }
     if (nowHead.previousElementSibling !== head) head.after(nowHead);
-    nowHead.title = `CTR за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня). Цвет — место среди роликов канала за те же дни.` +
+    nowHead.title = 'CTR за последние 48 часов с данными: Studio отдаёт дни с задержкой примерно в два дня. Цвет — место среди роликов канала за те же дни.' +
       (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button');
     button.disabled = !!record?.loading;
@@ -303,9 +303,9 @@
       if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
       const id = idOf(row);
       paint(cell, all[id]); paint(nowCell, recent[id]);
-      cell.title = all[id] ? explainCtr(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «CTR».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
-      nowCell.title = recent[id] ? explainCtr(recent[id], `за последние ${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «CTR».' :
-        `За последние ${RECENT_DAYS} дня меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;
+      cell.title = all[id] ? explainCtr(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «CTR (все)».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
+      nowCell.title = recent[id] ? explainCtr(recent[id], 'за 48 часов') : !record?.recent ? 'Нажмите ↻ в заголовке «CTR (все)».' :
+        `За последние 48 часов меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;
     }
   }
   function draw() { if (!document.querySelector('ytcp-video-row')) return; header(); rows(); }
