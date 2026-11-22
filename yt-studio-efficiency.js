@@ -208,7 +208,24 @@
     u.searchParams.set('time_period', recentRange(now));
     return u.href;
   }
-  const api = { agreement, learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  // The CTR columns (author, 22 November 2026: of every Studio measure only CTR followed views on all large channels,
+  // 66% of video pairs; a hit with CTR under the channel's median did not occur on two of them). Each video's CTR with
+  // its place among the channel's videos: the share of them it beats, and the channel's median.
+  function ctrPlaces(byId, minViews = MIN_NOW_VIEWS) {
+    const known = Object.entries(byId || {}).filter(([, v]) => v.views >= minViews && Number.isFinite(v.ctr));
+    const all = known.map(([, v]) => v.ctr).sort((a, b) => a - b), result = {};
+    const median = all.length ? (all[(all.length - 1) >> 1] + all[all.length >> 1]) / 2 : null;
+    for (const [id, v] of known) {
+      const below = all.filter(x => x < v.ctr).length, equal = all.filter(x => x === v.ctr).length;
+      result[id] = { ctr: v.ctr, place: all.length < 2 ? 50 : (below + (equal - 1) / 2) / (all.length - 1) * 100, median, impr: v.impr };
+    }
+    return result;
+  }
+  function explainCtr(r, period = 'за всё время') {
+    return `CTR ${period}: ${one(r.ctr)}%\nМедиана канала: ${one(r.median)}%\nВыше, чем у ${Math.round(r.place)}% роликов канала` +
+      (Number.isFinite(r.impr) ? `\nПоказов: ${new Intl.NumberFormat('ru-RU').format(r.impr)}` : '');
+  }
+  const api = { ctrPlaces, explainCtr, agreement, learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -218,9 +235,9 @@
   const style = document.createElement('style');
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
-  style.textContent = `[${ROOT}]{flex:0 0 150px!important;width:150px!important;min-width:150px!important;max-width:150px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
+  style.textContent = `[${ROOT}]{flex:0 0 90px!important;width:90px!important;min-width:90px!important;max-width:90px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
     [${ROOT}=cell],[${ROOT}=nowcell],[${ROOT}=reachcell]{align-items:flex-start!important;padding-top:12px!important}
-    [${ROOT}=nowhead],[${ROOT}=nowcell],[${ROOT}=reachhead],[${ROOT}=reachcell]{flex-basis:100px!important;width:100px!important;min-width:100px!important;max-width:100px!important}
+    [${ROOT}=nowhead],[${ROOT}=nowcell],[${ROOT}=reachhead],[${ROOT}=reachcell]{flex-basis:110px!important;width:110px!important;min-width:110px!important;max-width:110px!important}
     [${ROOT}=nowhead],[${ROOT}=reachhead]{align-items:center!important}
     [${ROOT}=cell] b,[${ROOT}=nowcell] b,[${ROOT}=reachcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
     [${ROOT}=cell] b[data-partial]{opacity:.6}
@@ -240,7 +257,7 @@
     let head = last.parentElement.querySelector(`[${ROOT}=head]`);
     if (!head) {
       head = document.createElement('div'); head.setAttribute(ROOT, 'head'); head.className = last.className.replace(/tablecell-\S+/g, '').trim();
-      const label = document.createElement('span'); label.textContent = 'Эффективность';
+      const label = document.createElement('span'); label.textContent = 'CTR';
       const button = document.createElement('button'); button.type = 'button'; button.textContent = '↻';
       button.onclick = () => void refresh();
       head.append(label, button);
@@ -248,9 +265,9 @@
     if (head.previousElementSibling !== last) last.after(head);
     head.parentElement.querySelector(`[${ROOT}=reachhead]`)?.remove();
     let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
-    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
+    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'CTR сейчас'; }
     if (nowHead.previousElementSibling !== head) head.after(nowHead);
-    nowHead.title = `Те же показатели за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня), по сравнению с другими роликами канала.` +
+    nowHead.title = `CTR за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня). Цвет — место среди роликов канала за те же дни.` +
       (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button');
     button.disabled = !!record?.loading;
@@ -258,22 +275,20 @@
     const mark = record?.error && !record?.loading ? '⚠' : '↻';
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
-    const learned = learnWeights(record?.now), all = nowScores(record?.now, MIN_NOW_VIEWS, learned.weights);
-    const shown = Object.values(all).filter(r => Number.isFinite(r.views));
-    const match = shown.length >= LEARN_MIN ? agreement(shown.map(r => r.value), shown.map(r => r.views)) : null;
-    const weightsText = MEASURES.filter(([, k]) => learned.weights[k] > 0).map(([label, k]) => `${label} ${Math.round(learned.weights[k] * 100)}%`).join(', ');
-    head.title = `Формула этого канала: ${weightsText}.` + (learned.learned ? ` Веса подобраны по ${learned.n} роликам канала: чем сильнее показатель идёт вместе с просмотрами, тем больше его вес. Сами просмотры в оценку не входят.` : ' Роликов мало, веса общие.') +
-      (match !== null ? `\nСовпадение с просмотрами: ${Math.round(match)}% (из двух роликов у того, чья оценка выше, больше просмотров; 50% — наугад).` : '') +
+    const places = ctrPlaces(record?.now), first = Object.values(places)[0];
+    head.title = 'CTR ролика за всё время. Из всех показателей Studio только CTR шёл вместе с просмотрами на всех больших каналах; ' +
+      'ролик с CTR ниже медианы канала хитом не становился. Зелёный — выше, чем у 60% роликов канала, красный — ниже, чем у 60%.' +
+      (first ? `\nМедиана канала: ${one(first.median)}%` : '') +
       (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить «Эффективность» и «Сейчас»';
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить CTR за всё время и за последние дни';
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const learned = learnWeights(record?.now), all = nowScores(record?.now, MIN_NOW_VIEWS, learned.weights), recent = nowScores(record?.recent, MIN_RECENT_VIEWS, learned.weights);
+    const all = ctrPlaces(record?.now), recent = ctrPlaces(record?.recent, MIN_RECENT_VIEWS);
     const paint = (cell, r) => {
-      const b = cell.firstChild, label = r ? String(r.value) : '—';
+      const b = cell.firstChild, label = r ? one(r.ctr) + '%' : '—';
       if (b.textContent !== label) b.textContent = label;
-      const [bg, fg] = r ? color(r.value) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
+      const [bg, fg] = r ? (r.place >= 60 ? color(100) : r.place >= 40 ? color(50) : color(0)) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
       b.style.background = bg; b.style.color = fg;
     };
     const make = (kind) => { const c = document.createElement('div'); c.setAttribute(ROOT, kind); c.className = 'cell-body'; c.append(document.createElement('b')); return c; };
@@ -288,8 +303,8 @@
       if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
       const id = idOf(row);
       paint(cell, all[id]); paint(nowCell, recent[id]);
-      cell.title = all[id] ? explainNow(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «Эффективность».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
-      nowCell.title = recent[id] ? explainNow(recent[id], `${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «Эффективность».' :
+      cell.title = all[id] ? explainCtr(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «CTR».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
+      nowCell.title = recent[id] ? explainCtr(recent[id], `за последние ${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «CTR».' :
         `За последние ${RECENT_DAYS} дня меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;
     }
   }

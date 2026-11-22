@@ -129,3 +129,8 @@ test('agreement is the share of video pairs ordered like their views (50% is cha
   assert.equal(eff.agreement([1,2,3],[10,20,30]),100);assert.equal(eff.agreement([3,2,1],[10,20,30]),0);
   assert.ok(Math.abs(eff.agreement([1,3,2],[10,20,30])-200/3)<1e-9);assert.equal(eff.agreement([1],[1]),null);
 });
+test('the CTR columns show each video CTR with its place among the channel videos',()=>{
+  const p=eff.ctrPlaces({a:{views:500,impr:9000,ctr:6},b:{views:500,impr:9000,ctr:4},c:{views:500,impr:9000,ctr:2},q:{views:50,impr:500,ctr:9}});
+  assert.equal(p.a.place,100);assert.equal(p.b.place,50);assert.equal(p.c.place,0);assert.equal(p.q,undefined);assert.equal(p.a.median,4);
+  assert.equal(eff.explainCtr(p.a),'CTR за всё время: 6%\nМедиана канала: 4%\nВыше, чем у 100% роликов канала\nПоказов: 9 000');
+});

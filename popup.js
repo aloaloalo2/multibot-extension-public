@@ -1134,7 +1134,7 @@ chrome.storage.local.get(["ytsOn"], (r) => {
 ytsOnEl.addEventListener("change", () => {
   chrome.storage.local.set({ ytsOn: ytsOnEl.checked });
 });
-// «Эффективность контента»: колонка оценки 0–100 в списке роликов «Контент»
+// «CTR роликов»: колонки CTR в списке роликов «Контент»
 // (yt-studio-efficiency.js). По умолчанию включено.
 const ytsEffEl = document.getElementById("ytsEff");
 chrome.storage.local.get(["ytsEff"], (r) => {
