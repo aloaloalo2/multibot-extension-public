@@ -100,16 +100,16 @@
   function missing(ids, earlyById) {
     return [...new Set(ids)].filter(id => /^[\w-]{11}$/.test(id) && !(earlyById?.[id]?.days >= EARLY_DAYS)).slice(0, MAX_IDS);
   }
-  // «Сейчас»: YouTube keeps re-deciding every day. Inside a video's life (1600 days of 69 videos, 22 November 2026)
-  // the next two days' impressions grew after days with a higher percentage viewed and longer views (+0.20 each),
-  // CTR mattered less (+0.1), subscribers and shares did not. One report of the last 7 days ranks the channel's videos.
-  const NOW = [['% просмотра', 'avp', 0.4], ['Длина просмотра', 'avd', 0.4], ['CTR', 'ctr', 0.2]];
+  // «Сейчас»: the same formula as «Эффективность» (seconds watched per impression 70%, subscribers per 1000 views 30%,
+  // ranked inside the channel), on the last 7 days instead of the first 48 hours (author, 22 November 2026: the two
+  // columns must be comparable). Videos YouTube hardly shows this week are not scored.
+  const WEEK_METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE'];
   const MIN_NOW_IMPRESSIONS = 200;
   function weekUrl(channelId) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
     for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
-    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME']) u.searchParams.append('t_metrics', m);
+    for (const m of WEEK_METRICS) u.searchParams.append('t_metrics', m);
     u.searchParams.set('dimension', 'VIDEO');
     u.searchParams.set('o_column', 'VIDEO_THUMBNAIL_IMPRESSIONS');
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
@@ -121,31 +121,30 @@
     for (const row of root.querySelectorAll('yta-explore-table-row')) {
       const id = (row.querySelector('img')?.getAttribute('src') || '').match(/\/vi(?:_webp)?\/([\w-]{11})\//)?.[1];
       const c = [...row.querySelectorAll('.debug-metric-value')].map(text);
-      if (!id || c.length !== 5) continue;
-      result[id] = { views: number(c[0]) || 0, impr: number(c[1]) || 0, ctr: number(c[2]), avp: number(c[3]), avd: seconds(c[4]) };
+      if (!id || c.length !== WEEK_METRICS.length) continue;
+      result[id] = { views: number(c[0]) || 0, impr: number(c[1]) || 0, ctr: number(c[2]), avd: seconds(c[3]), subs: number(c[4]) || 0 };
     }
     return result;
   }
   function nowScores(byId) {
-    const known = Object.entries(byId || {}).filter(([, v]) => v.impr >= MIN_NOW_IMPRESSIONS && v.views >= MIN_EARLY_VIEWS && NOW.every(([, k]) => Number.isFinite(v[k])));
+    const known = Object.entries(byId || {}).filter(([, v]) => v.impr >= MIN_NOW_IMPRESSIONS && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
     const rank = (key, value) => {
       if (known.length < 2) return 50;
-      const all = known.map(([, v]) => v[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
+      const all = known.map(([, , m]) => m[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
       return (below + (equal - 1) / 2) / (all.length - 1) * 100;
     };
     const result = {};
-    for (const [id, v] of known) {
-      const parts = NOW.map(([label, key, weight]) => ({ label, key, weight, value: v[key], points: rank(key, v[key]) }));
+    for (const [id, v, m] of known) {
+      const parts = MEASURES.map(([label, key, weight]) => ({ label, key, weight, value: m[key], points: rank(key, m[key]) }));
       result[id] = { value: Math.round(parts.reduce((a, p) => a + p.points * p.weight, 0)), parts, impr: v.impr };
     }
     return result;
   }
-  const clock = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   function explainNow(result) {
-    return result.parts.map(p => `${p.label} (7 дн): ${p.key === 'avd' ? clock(p.value) : one(p.value) + '%'} → ${Math.round(p.points)}`).join('\n') +
+    return result.parts.map(p => `${p.label} (7 дн): ${one(p.value)} → ${Math.round(p.points)}`).join('\n') +
       `\nПоказов за 7 дней: ${new Intl.NumberFormat('ru-RU').format(result.impr)}`;
   }
-  const api = { sessionIndex, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, NOW, MAX_IDS };
+  const api = { sessionIndex, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -186,7 +185,7 @@
     let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
     if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
     if (nowHead.previousElementSibling !== head) head.after(nowHead);
-    nowHead.title = 'Продвигает ли YouTube ролик сейчас: % просмотра, длина просмотра и CTR за последние 7 дней по сравнению с другими роликами канала. ' +
+    nowHead.title = 'Та же формула, что «Эффективность» (секунды просмотра на показ и подписки на 1000 просмотров), за последние 7 дней, по сравнению с другими роликами канала. ' +
       `Ролики меньше чем с ${MIN_NOW_IMPRESSIONS} показами за неделю не оцениваются.` + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button'), left = missing(pageIds(), record?.early).length;
     button.disabled = !!record?.loading;
