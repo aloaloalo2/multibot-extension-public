@@ -283,6 +283,13 @@
     collectorTimer = setInterval(async () => {
       if (finished) return;
       const home = document.querySelector('#home-button')?.getAttribute('href') || '';
+      // A new tab opens Studio as the channel last chosen through the avatar menu. Another channel's report then
+      // reads «У вас нет доступа к этой странице» and would only time out.
+      if (!home && /нет доступа|немає доступу|don.t have (permission|access)/i.test((document.body?.innerText || '').slice(0, 2000))) {
+        finished = true; clearInterval(collectorTimer);
+        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, denied: true }); } catch {}
+        return;
+      }
       if (!home.includes('/channel/' + job.context.channelId)) return;
       if (job.mode === 'now') {
         // «Сейчас»: the channel's videos over the last 7 days.

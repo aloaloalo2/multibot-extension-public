@@ -182,9 +182,13 @@
       `Ролики меньше чем с ${MIN_NOW_IMPRESSIONS} показами за неделю не оцениваются.` + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button'), left = missing(pageIds(), record?.early).length;
     button.disabled = !!record?.loading;
+    // A failed refresh shows ⚠ in place of ↻: its reason is in the tooltip, a click tries again.
+    const mark = record?.error && !record?.loading ? '⚠' : '↻';
+    if (button.textContent !== mark) button.textContent = mark;
+    button.style.color = mark === '⚠' ? '#f9ab00' : '';
     head.title = 'Насколько первые 48 часов ролика просят YouTube его продвигать: секунды просмотра на показ и подписки на 1000 просмотров, ' +
       'по сравнению с другими роликами этого канала. Просмотры не учитываются.' + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : `Обновить «Сейчас» за 7 дней${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить «Сейчас» за 7 дней${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
     button.setAttribute('aria-label', button.title);
   }
   function rows() {

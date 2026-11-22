@@ -218,6 +218,11 @@
         return { ok: true, collector: { mode: job.mode, nonce: job.nonce, context: job.context } };
       }
       if (message.nonce !== job.nonce || message.range !== job.context.range) return { ok: false };
+      if (message.denied) {
+        job.modes = [];
+        await finish('Studio сейчас открыт на другом канале, и отчёты этого канала недоступны. Переключитесь на этот канал через аватар → «Сменить аккаунт» и нажмите ↻ ещё раз.');
+        return { ok: true };
+      }
       if (job.mode === 'now') {
         await merge(job.context, {}, { now: cleanNow(message.now), nowAt: Date.now() });
         await next();

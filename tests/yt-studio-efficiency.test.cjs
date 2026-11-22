@@ -94,3 +94,20 @@ test('«Сейчас» ranks the last 7 days: percentage viewed 40%, view length
   const w=eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','30,1 %','4:10']),{querySelector:()=>null,querySelectorAll:()=>[]}]})});
   assert.deepEqual(w,{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avp:30.1,avd:250}});
 });
+test('a report of another channel (no access) stops the refresh with a clear instruction',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm');
+  const local={},session={},listeners=[],closed=[],tabs=new Map();
+  const area=state=>({get:async key=>({[key]:structuredClone(state[key])}),set:async obj=>Object.assign(state,structuredClone(obj)),remove:async key=>delete state[key]});
+  const chrome={storage:{local:area(local),session:area(session)},runtime:{onMessage:{addListener:f=>listeners.push(f)}},
+    tabs:{create:async o=>{const t={id:901,...o};tabs.set(901,t);return t;},update:async()=>{},remove:async id=>closed.push(id),get:async id=>tabs.get(id),onRemoved:{addListener(){}}},
+    debugger:{attach:async()=>{},sendCommand:async()=>{},detach:async()=>{},onDetach:{addListener(){}}}};
+  vm.runInContext(fs.readFileSync(require.resolve('../yt-studio-summary-worker.js'),'utf8'),vm.createContext({chrome,URL,Date,crypto:require('node:crypto').webcrypto,setTimeout:()=>1,clearTimeout(){},console}));
+  const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
+  const ctx={...eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}),ids:['WA8pO04HUwA']};
+  const call=(m,id=9,url=page)=>new Promise(r=>listeners[0](m,{tab:{id,url}},r));
+  await call({type:'mbEfficiencyRefresh',context:ctx});await new Promise(setImmediate);
+  const probe=await call({type:'mbStudioSummaryProbe'},901,eff.weekUrl(channel));
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',denied:true},901,eff.weekUrl(channel));
+  const rec=local['mbEfficiency:'+channel];
+  assert.equal(rec.loading,false);assert.match(rec.error,/Сменить аккаунт/);assert.deepEqual(closed,[901]);
+});
