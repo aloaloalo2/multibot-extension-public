@@ -1,15 +1,18 @@
-// «Эффективность» column on the Studio Content list: how strongly a video's first 48 hours ask YouTube to push it.
-// Measured on the author's channels (22 November 2026, Тимми, Валентин Чичваркин, Космос PRO, 69 videos with daily
-// data): a video gets impressions later when its first two days give many seconds watched per impression (CTR × average
-// view length) and many subscribers per 1000 views. Lifetime likes, shares and percentage viewed fall as a video reaches
-// a colder audience, so they describe reach, not its cause, and are left out. Each measure is compared with the same
-// channel's other videos (percentile), so niches do not compete. Views do not count. Weights 70/30 from that sample.
+// «Эффективность» and «Сейчас» columns on the Studio Content list: how a video does on the measures that, inside a
+// channel, follow its views (CTR 70%, subscribers per 1000 views 20%, view length 10%), over its whole life and over
+// the last 4 days with data. Each measure is ranked among the same channel's videos, so niches do not compete.
+// Views and impressions never enter the score (author, 22 November 2026).
 (() => {
   const ROOT = 'data-multibot-efficiency';
   const EARLY_DAYS = 2, MIN_EARLY_VIEWS = 20, MAX_IDS = 60;
+  // Views and impressions are never part of the score. Measured on 90 videos of four channels (22 November 2026):
+  // inside a channel, lifetime CTR follows views most (+42 of 100), subscribers per 1000 views and view length add a
+  // little and steady the score across channels (CTR 70 + subscribers 20 + length 10: +40, no channel below +26).
+  // Shares, likes and percentage viewed fall as a video reaches a colder audience, so they are left out.
   const MEASURES = [
-    ['Секунд просмотра на показ', 'wpi', 0.7],
-    ['Подписок на 1000 просмотров', 'subs', 0.3],
+    ['CTR', 'ctr', 0.7],
+    ['Подписок на 1000 просмотров', 'subs', 0.2],
+    ['Длина просмотра', 'avd', 0.1],
   ];
   const METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE'];
   const text = e => (e?.textContent || '').replace(/[  ]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -54,7 +57,7 @@
   }
   function measures(e) {
     if (!e || !(e.views >= MIN_EARLY_VIEWS) || !(e.impr > 0) || !Number.isFinite(e.ctr) || !Number.isFinite(e.avd)) return null;
-    return { wpi: e.ctr / 100 * e.avd, subs: Math.max(0, e.subs) / e.views * 1000 };
+    return { ctr: e.ctr, avd: e.avd, subs: Math.max(0, e.subs) / e.views * 1000 };
   }
   // Percentile among the channel's videos with complete first two days: 0 = weakest on the channel, 100 = strongest.
   function scores(earlyById) {
@@ -141,7 +144,8 @@
     return result;
   }
   function explainNow(result, period = 'всё время') {
-    return result.parts.map(p => `${p.label} (${period}): ${one(p.value)} → ${Math.round(p.points)}`).join('\n');
+    const show = p => p.key === 'ctr' ? one(p.value) + '%' : p.key === 'avd' ? `${Math.floor(p.value / 60)}:${String(Math.round(p.value % 60)).padStart(2, '0')}` : one(p.value);
+    return result.parts.map(p => `${p.label} (${period}): ${show(p)} → ${Math.round(p.points)}`).join('\n');
   }
   // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
   // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
@@ -164,24 +168,7 @@
     u.searchParams.set('time_period', recentRange(now));
     return u.href;
   }
-  // «С показами»: for comparison with the quality-only score (author, 22 November 2026). Half is the quality score,
-  // half is how many impressions a day YouTube gave the video since publication, ranked among the videos given.
-  // Impressions are YouTube's decision to push the video, so this half partly follows reach.
-  function withReach(quality, videos, now = Date.now()) {
-    const known = videos.map(v => ({ ...v, days: Math.max(1, (now - Date.parse(v.date)) / 86400000) }))
-      .filter(v => quality[v.id] && Number.isFinite(v.impr) && v.days > 0 && v.date);
-    const rates = known.map(v => v.impr / v.days), result = {};
-    for (const v of known) {
-      const rate = v.impr / v.days, below = rates.filter(x => x < rate).length, equal = rates.filter(x => x === rate).length;
-      const points = rates.length < 2 ? 50 : (below + (equal - 1) / 2) / (rates.length - 1) * 100;
-      result[v.id] = { value: Math.round(0.5 * quality[v.id].value + 0.5 * points), quality: quality[v.id].value, rate, points };
-    }
-    return result;
-  }
-  function explainReach(r) {
-    return `Качество: ${r.quality} (вес 50%)\nПоказов YouTube в день: ${new Intl.NumberFormat('ru-RU').format(Math.round(r.rate))} → ${Math.round(r.points)} (вес 50%)`;
-  }
-  const api = { withReach, explainReach, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  const api = { sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -219,13 +206,10 @@
       head.append(label, button);
     }
     if (head.previousElementSibling !== last) last.after(head);
-    let reachHead = head.parentElement.querySelector(`[${ROOT}=reachhead]`);
-    if (!reachHead) { reachHead = document.createElement('div'); reachHead.setAttribute(ROOT, 'reachhead'); reachHead.className = head.className; reachHead.textContent = 'С показами'; }
-    if (reachHead.previousElementSibling !== head) head.after(reachHead);
-    reachHead.title = 'Для сравнения: половина — «Эффективность» (качество), половина — сколько показов в день YouTube дал ролику с публикации, по сравнению с роликами этой страницы.';
+    head.parentElement.querySelector(`[${ROOT}=reachhead]`)?.remove();
     let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
     if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
-    if (nowHead.previousElementSibling !== reachHead) reachHead.after(nowHead);
+    if (nowHead.previousElementSibling !== head) head.after(nowHead);
     nowHead.title = `Те же показатели за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня), по сравнению с другими роликами канала.` +
       (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button');
@@ -234,7 +218,7 @@
     const mark = record?.error && !record?.loading ? '⚠' : '↻';
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
-    head.title = 'Секунды просмотра на показ (70%) и подписки на 1000 просмотров (30%) по сравнению с другими роликами канала: ' +
+    head.title = 'CTR (70%), подписки на 1000 просмотров (20%) и длина просмотра (10%) по сравнению с другими роликами канала, ' +
       'за всё время. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
     button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить «Эффективность» и «Сейчас»';
     button.setAttribute('aria-label', button.title);
@@ -249,21 +233,16 @@
     };
     const make = (kind) => { const c = document.createElement('div'); c.setAttribute(ROOT, kind); c.className = 'cell-body'; c.append(document.createElement('b')); return c; };
     const idOf = row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
-    const page = [...document.querySelectorAll('ytcp-video-row')].map(row => ({ id: idOf(row), date: parseDate(text(row.querySelector('.tablecell-date'))) }))
-      .filter(v => v.id && v.date && record?.now?.[v.id]).map(v => ({ ...v, impr: record.now[v.id].impr }));
-    const reach = withReach(all, page);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
       const cell = last.parentElement.querySelector(`[${ROOT}=cell]`) || make('cell');
       if (cell.previousElementSibling !== last) last.after(cell);
-      const reachCell = cell.parentElement.querySelector(`[${ROOT}=reachcell]`) || make('reachcell');
-      if (reachCell.previousElementSibling !== cell) cell.after(reachCell);
+      cell.parentElement.querySelector(`[${ROOT}=reachcell]`)?.remove();
       const nowCell = cell.parentElement.querySelector(`[${ROOT}=nowcell]`) || make('nowcell');
-      if (nowCell.previousElementSibling !== reachCell) reachCell.after(nowCell);
+      if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
       const id = idOf(row);
-      paint(cell, all[id]); paint(reachCell, reach[id]); paint(nowCell, recent[id]);
-      reachCell.title = reach[id] ? explainReach(reach[id]) : all[id] ? 'Нет даты публикации в списке.' : 'Нет оценки качества.';
+      paint(cell, all[id]); paint(nowCell, recent[id]);
       cell.title = all[id] ? explainNow(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «Эффективность».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
       nowCell.title = recent[id] ? explainNow(recent[id], `${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «Эффективность».' :
         `За последние ${RECENT_DAYS} дня меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;

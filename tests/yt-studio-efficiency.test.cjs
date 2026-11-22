@@ -17,17 +17,6 @@ test('the first two days of a video report become its early window, with the pub
   assert.equal(eff.early(rows.slice(0,1)).days,1);assert.equal(eff.early([]),null);
   assert.equal(eff.parseDate('Nov 14, 2026'),'2026-11-14');assert.equal(eff.parseDate('5 лист. 2026 р.'),'2026-11-05');
 });
-test('the score ranks seconds watched per impression (70%) and subscribers per 1000 views (30%) inside the channel',()=>{
-  const v=(ctr,avd,subs,views=1000,days=2)=>({days,views,impr:views/ctr*100,ctr,avd,subs,date:'2026-11-01'});
-  const s=eff.scores({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20),young:v(9,400,9,1000,1),few:v(9,400,9,10)});
-  assert.equal(s.a.value,Math.round(.7*100+.3*(2/3*100)));
-  assert.equal(s.c.value,0);
-  assert.equal(s.d.parts[1].points,100);
-  assert.ok(s.young.partial);assert.equal(s.young.compared,4);
-  assert.equal(s.few,undefined);
-  assert.equal(eff.explain(s.a),'Секунд просмотра на показ (48 ч): 30 → 100\nПодписок на 1000 просмотров (48 ч): 10 → 67');
-  assert.match(eff.explain(s.young),/предварительная/);
-});
 test('views do not count: the same early quality scores the same whatever the reach',()=>{
   const v=(views)=>({days:2,views,impr:views*20,ctr:5,avd:300,subs:views/100});
   const s=eff.scores({a:v(100),b:v(100000)});
@@ -48,17 +37,6 @@ test('the efficiency request is valid only from its own channel Content page and
   assert.equal(eff.context(`https://studio.youtube.com/channel/${channel}/analytics/hub_content`,{querySelector:()=>null}),null);
   const clean=cleanEarly({WA8pO04HUwA:{days:2,views:5,impr:50,ctr:4,avd:1.5,subs:0,date:'2026-11-01',evil:1},svFNQL7zzzz:{days:2,views:9}},['WA8pO04HUwA']);
   assert.deepEqual(clean,{WA8pO04HUwA:{days:2,date:'2026-11-01',views:5,impr:50,subs:0,ctr:4,avd:1.5}});
-});
-test('the whole-life part uses the first-48-hours formula; videos with few views are not scored',()=>{
-  const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
-  const s=eff.nowScores({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20),quiet:{views:90,impr:1500,ctr:9,avd:900,subs:9}});
-  const e=eff.scores(Object.fromEntries(Object.entries({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20)}).map(([k,x])=>[k,{...x,days:2}])));
-  for (const k of ['a','b','c','d']) assert.equal(s[k].value,e[k].value);
-  assert.equal(s.quiet,undefined);
-  assert.equal(eff.explainNow(s.a),'Секунд просмотра на показ (всё время): 30 → 100\nПодписок на 1000 просмотров (всё время): 10 → 67');
-  const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
-  const w=eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7']),{querySelector:()=>null,querySelectorAll:()=>[]}]})});
-  assert.deepEqual(w,{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7}});
 });
 test('a report of another channel (no access) stops the refresh with a clear instruction',async()=>{
   const fs=require('node:fs'),vm=require('node:vm');
@@ -114,19 +92,23 @@ test('one refresh reads two channel reports: the whole life, then the last 4 day
   assert.deepEqual(Object.keys(rec.now),['WA8pO04HUwA']);assert.deepEqual(Object.keys(rec.recent),['svFNQL7-4zo']);
   assert.equal(rec.loading,false);assert.deepEqual(closed,[801]);
 });
+test('the score ranks CTR (70%), subscribers per 1000 views (20%) and view length (10%) inside the channel',()=>{
+  const v=(ctr,avd,subs,views=1000)=>({views,impr:views/ctr*100,ctr,avd,subs});
+  const s=eff.nowScores({a:v(10,100,1),b:v(5,300,9),c:v(2,200,5),few:v(9,400,9,90)});
+  assert.equal(s.a.value,Math.round(.7*100+.2*0+.1*0));
+  assert.equal(s.b.value,Math.round(.7*50+.2*100+.1*100));
+  assert.equal(s.few,undefined);
+  assert.equal(eff.explainNow(s.b),'CTR (всё время): 5% → 50\nПодписок на 1000 просмотров (всё время): 9 → 100\nДлина просмотра (всё время): 5:00 → 100');
+  const same=eff.nowScores({a:v(5,300,0.5,100),b:v(5,300,5000,1e6),c:v(2,100,1)});
+  assert.equal(same.a.value,same.b.value);
+  const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
+  assert.deepEqual(eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7'])]})}),{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7}});
+});
 test('«Сейчас» covers the last 4 California days before yesterday, as Studio counts its days',()=>{
   const r=eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(Number);
   assert.deepEqual(r.map(x=>new Date(x).toISOString()),['2026-11-17T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
   assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-05T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
   const s=eff.nowScores({a:{views:25,impr:900,ctr:5,avd:200,subs:1},b:{views:25,impr:900,ctr:3,avd:100,subs:0},q:{views:10,impr:300,ctr:9,avd:900,subs:5}},eff.MIN_RECENT_VIEWS);
   assert.equal(s.a.value,100);assert.equal(s.q,undefined);
-  assert.equal(eff.explainNow(s.a,'4 дня'),'Секунд просмотра на показ (4 дня): 10 → 100\nПодписок на 1000 просмотров (4 дня): 40 → 100');
-});
-test('«С показами» is half quality, half impressions a day since publication ranked among the given videos',()=>{
-  const now=Date.parse('2026-11-22T12:00:00Z');
-  const q={a:{value:20},b:{value:80},c:{value:50}};
-  const r=eff.withReach(q,[{id:'a',date:'2026-11-12',impr:1000000},{id:'b',date:'2026-11-12',impr:1000},{id:'c',date:'2026-11-21',impr:5000},{id:'x',date:'2026-11-01',impr:9}],now);
-  assert.equal(r.a.value,Math.round(.5*20+.5*100));assert.equal(r.b.value,Math.round(.5*80));assert.equal(r.x,undefined);
-  assert.ok(Math.abs(r.c.rate-5000/1.5)<1e-6);
-  assert.match(eff.explainReach(r.a),/^Качество: 20 \(вес 50%\)\nПоказов YouTube в день: .* → 100 \(вес 50%\)$/);
+  assert.match(eff.explainNow(s.a,'4 дня'),/^CTR \(4 дня\): 5% → 100\n/);
 });
