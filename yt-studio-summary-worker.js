@@ -45,7 +45,7 @@
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
     for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
-    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE']) u.searchParams.append('t_metrics', m);
+    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE', 'AVERAGE_WATCH_PERCENTAGE', 'SHARINGS']) u.searchParams.append('t_metrics', m);
     u.searchParams.set('dimension', 'VIDEO');
     u.searchParams.set('o_column', 'VIDEO_THUMBNAIL_IMPRESSIONS');
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
@@ -73,6 +73,8 @@
       const row = { views: v.views, impr: v.impr };
       if (Number.isFinite(v.ctr) && v.ctr >= 0 && v.ctr <= 100) row.ctr = v.ctr;
       if (Number.isFinite(v.subs) && Math.abs(v.subs) < 1e9) row.subs = v.subs;
+      if (Number.isFinite(v.avp) && v.avp >= 0 && v.avp <= 1000) row.avp = v.avp;
+      if (Number.isFinite(v.shares) && v.shares >= 0 && v.shares < 1e9) row.shares = v.shares;
       if (Number.isFinite(v.avd) && v.avd >= 0 && v.avd < 86400) row.avd = v.avd;
       result[id] = row;
     }

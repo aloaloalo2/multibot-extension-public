@@ -5,15 +5,19 @@
 (() => {
   const ROOT = 'data-multibot-efficiency';
   const EARLY_DAYS = 2, MIN_EARLY_VIEWS = 20, MAX_IDS = 60;
-  // Views and impressions are never part of the score. Measured on 90 videos of four channels (22 November 2026):
-  // inside a channel, lifetime CTR follows views most (+42 of 100), subscribers per 1000 views and view length add a
-  // little and steady the score across channels (CTR 70 + subscribers 20 + length 10: +40, no channel below +26).
-  // Shares, likes and percentage viewed fall as a video reaches a colder audience, so they are left out.
+  // Views and impressions are never part of the score. What follows views differs by channel (22 November 2026: CTR on
+  // Чичваркин +47, on Космос +7, where subscribers per 1000 views gave +79), so each channel gets its own weights:
+  // a measure weighs as much as its rank correlation with the channel's views (negative ones weigh nothing). Checked by
+  // leaving each video out of its own weights: +35…+67 on four channels. The weights below serve a channel with fewer
+  // than LEARN_MIN videos.
   const MEASURES = [
     ['CTR', 'ctr', 0.7],
     ['Подписок на 1000 просмотров', 'subs', 0.2],
     ['Длина просмотра', 'avd', 0.1],
+    ['% просмотра', 'avp', 0],
+    ['Поделились на 1000 просмотров', 'shares', 0],
   ];
+  const LEARN_MIN = 6;
   const METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE'];
   const text = e => (e?.textContent || '').replace(/[  ]/g, ' ').replace(/\s+/g, ' ').trim();
   const number = s => { const v = Number(String(s ?? '').replace(/[\s  %]/g, '').replace(',', '.')); return Number.isFinite(v) ? v : null; };
@@ -57,7 +61,8 @@
   }
   function measures(e) {
     if (!e || !(e.views >= MIN_EARLY_VIEWS) || !(e.impr > 0) || !Number.isFinite(e.ctr) || !Number.isFinite(e.avd)) return null;
-    return { ctr: e.ctr, avd: e.avd, subs: Math.max(0, e.subs) / e.views * 1000 };
+    return { ctr: e.ctr, avd: e.avd, subs: Math.max(0, e.subs) / e.views * 1000,
+      avp: Number.isFinite(e.avp) ? e.avp : NaN, shares: Number.isFinite(e.shares) ? e.shares / e.views * 1000 : NaN };
   }
   // Percentile among the channel's videos with complete first two days: 0 = weakest on the channel, 100 = strongest.
   function scores(earlyById) {
@@ -72,7 +77,7 @@
     for (const [id, e] of Object.entries(earlyById || {})) {
       const m = measures(e);
       if (!m) continue;
-      const parts = MEASURES.map(([label, key, weight]) => ({ label, key, weight, value: m[key], points: rank(key, m[key]) }));
+      const parts = MEASURES.filter(([, , w]) => w > 0).map(([label, key, weight]) => ({ label, key, weight, value: m[key], points: rank(key, m[key]) }));
       result[id] = { value: Math.round(parts.reduce((a, p) => a + p.points * p.weight, 0)), parts, partial: e.days < EARLY_DAYS, compared: known.length };
     }
     return result;
@@ -106,7 +111,7 @@
   // The whole life of a video: the same measures (seconds watched per impression 70%, subscribers per 1000 views 30%,
   // ranked inside the channel) over all its days, from one lifetime report of the channel (author, 22 November 2026:
   // the score judges the whole video, not only its current week).
-  const WEEK_METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE'];
+  const WEEK_METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE', 'AVERAGE_WATCH_PERCENTAGE', 'SHARINGS'];
   const MIN_NOW_VIEWS = 100;   // the whole life: a video needs at least this many views to be judged
   function weekUrl(channelId) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
@@ -125,27 +130,53 @@
       const id = (row.querySelector('img')?.getAttribute('src') || '').match(/\/vi(?:_webp)?\/([\w-]{11})\//)?.[1];
       const c = [...row.querySelectorAll('.debug-metric-value')].map(text);
       if (!id || c.length !== WEEK_METRICS.length) continue;
-      result[id] = { views: number(c[0]) || 0, impr: number(c[1]) || 0, ctr: number(c[2]), avd: seconds(c[3]), subs: number(c[4]) || 0 };
+      result[id] = { views: number(c[0]) || 0, impr: number(c[1]) || 0, ctr: number(c[2]), avd: seconds(c[3]), subs: number(c[4]) || 0, avp: number(c[5]), shares: number(c[6]) || 0 };
     }
     return result;
   }
-  function nowScores(byId, minViews = MIN_NOW_VIEWS) {
+  const ranks = a => { const s = a.map((x, i) => [x, i]).sort((p, q) => p[0] - q[0]), r = new Array(a.length);
+    for (let i = 0; i < s.length;) { let j = i; while (j + 1 < s.length && s[j + 1][0] === s[i][0]) j++; for (let k = i; k <= j; k++) r[s[k][1]] = (i + j) / 2; i = j + 1; } return r; };
+  function spearman(x, y) {
+    const rx = ranks(x), ry = ranks(y), n = x.length, mx = rx.reduce((a, b) => a + b, 0) / n, my = ry.reduce((a, b) => a + b, 0) / n;
+    let sxy = 0, sx = 0, sy = 0;
+    for (let i = 0; i < n; i++) { sxy += (rx[i] - mx) * (ry[i] - my); sx += (rx[i] - mx) ** 2; sy += (ry[i] - my) ** 2; }
+    return sx && sy ? sxy / Math.sqrt(sx * sy) : 0;
+  }
+  // The channel's own weights from its lifetime report: each measure's rank correlation with views, negatives dropped.
+  function learnWeights(byId, minViews = MIN_NOW_VIEWS) {
+    const known = Object.values(byId || {}).filter(v => v.views >= minViews).map(v => [v, measures(v)]).filter(([, m]) => m);
+    const defaults = Object.fromEntries(MEASURES.map(([, k, w]) => [k, w]));
+    if (known.length < LEARN_MIN) return { weights: defaults, learned: false, n: known.length };
+    const rho = {};
+    for (const [, k] of MEASURES) {
+      const pairs = known.filter(([, m]) => Number.isFinite(m[k]));
+      rho[k] = pairs.length >= LEARN_MIN ? spearman(pairs.map(([, m]) => m[k]), pairs.map(([v]) => v.views)) : 0;
+    }
+    const total = Object.values(rho).reduce((a, r) => a + Math.max(0, r), 0);
+    if (!total) return { weights: defaults, learned: false, n: known.length, rho };
+    const weights = Object.fromEntries(Object.entries(rho).map(([k, r]) => [k, Math.max(0, r) / total]));
+    return { weights, learned: true, n: known.length, rho };
+  }
+  function nowScores(byId, minViews = MIN_NOW_VIEWS, weights = null) {
+    const w = weights || Object.fromEntries(MEASURES.map(([, k, x]) => [k, x]));
     const known = Object.entries(byId || {}).filter(([, v]) => v.views >= minViews && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
     const rank = (key, value) => {
       if (known.length < 2) return 50;
-      const all = known.map(([, , m]) => m[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
-      return (below + (equal - 1) / 2) / (all.length - 1) * 100;
+      const all = known.map(([, , m]) => m[key]).filter(Number.isFinite), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
+      return all.length < 2 ? 50 : (below + (equal - 1) / 2) / (all.length - 1) * 100;
     };
     const result = {};
     for (const [id, v, m] of known) {
-      const parts = MEASURES.map(([label, key, weight]) => ({ label, key, weight, value: m[key], points: rank(key, m[key]) }));
-      result[id] = { value: Math.round(parts.reduce((a, p) => a + p.points * p.weight, 0)), parts, impr: v.impr };
+      const parts = MEASURES.filter(([, key]) => w[key] > 0 && Number.isFinite(m[key])).map(([label, key]) => ({ label, key, weight: w[key], value: m[key], points: rank(key, m[key]) }));
+      const weight = parts.reduce((a, p) => a + p.weight, 0);
+      if (!weight) continue;
+      result[id] = { value: Math.round(parts.reduce((a, p) => a + p.points * p.weight, 0) / weight), parts, impr: v.impr, views: v.views };
     }
     return result;
   }
   function explainNow(result, period = 'всё время') {
-    const show = p => p.key === 'ctr' ? one(p.value) + '%' : p.key === 'avd' ? `${Math.floor(p.value / 60)}:${String(Math.round(p.value % 60)).padStart(2, '0')}` : one(p.value);
-    return result.parts.map(p => `${p.label} (${period}): ${show(p)} → ${Math.round(p.points)}`).join('\n');
+    const show = p => p.key === 'ctr' || p.key === 'avp' ? one(p.value) + '%' : p.key === 'avd' ? `${Math.floor(p.value / 60)}:${String(Math.round(p.value % 60)).padStart(2, '0')}` : one(p.value);
+    return result.parts.map(p => `${p.label} (${period}): ${show(p)} → ${Math.round(p.points)}, вес ${Math.round(p.weight * 100)}%`).join('\n');
   }
   // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
   // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
@@ -168,7 +199,7 @@
     u.searchParams.set('time_period', recentRange(now));
     return u.href;
   }
-  const api = { sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  const api = { learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -218,13 +249,18 @@
     const mark = record?.error && !record?.loading ? '⚠' : '↻';
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
-    head.title = 'CTR (70%), подписки на 1000 просмотров (20%) и длина просмотра (10%) по сравнению с другими роликами канала, ' +
-      'за всё время. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
+    const learned = learnWeights(record?.now), all = nowScores(record?.now, MIN_NOW_VIEWS, learned.weights);
+    const shown = Object.values(all).filter(r => Number.isFinite(r.views));
+    const match = shown.length >= LEARN_MIN ? Math.round(spearman(shown.map(r => r.value), shown.map(r => r.views)) * 100) : null;
+    const weightsText = MEASURES.filter(([, k]) => learned.weights[k] > 0).map(([label, k]) => `${label} ${Math.round(learned.weights[k] * 100)}%`).join(', ');
+    head.title = `Формула этого канала: ${weightsText}.` + (learned.learned ? ` Веса подобраны по ${learned.n} роликам канала: чем сильнее показатель идёт вместе с просмотрами, тем больше его вес. Сами просмотры в оценку не входят.` : ' Роликов мало, веса общие.') +
+      (match !== null ? `\nСовпадение с просмотрами: ${match > 0 ? '+' : ''}${match} из 100.` : '') +
+      (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
     button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить «Эффективность» и «Сейчас»';
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const all = nowScores(record?.now), recent = nowScores(record?.recent, MIN_RECENT_VIEWS);
+    const learned = learnWeights(record?.now), all = nowScores(record?.now, MIN_NOW_VIEWS, learned.weights), recent = nowScores(record?.recent, MIN_RECENT_VIEWS, learned.weights);
     const paint = (cell, r) => {
       const b = cell.firstChild, label = r ? String(r.value) : '—';
       if (b.textContent !== label) b.textContent = label;

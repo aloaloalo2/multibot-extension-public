@@ -98,11 +98,11 @@ test('the score ranks CTR (70%), subscribers per 1000 views (20%) and view lengt
   assert.equal(s.a.value,Math.round(.7*100+.2*0+.1*0));
   assert.equal(s.b.value,Math.round(.7*50+.2*100+.1*100));
   assert.equal(s.few,undefined);
-  assert.equal(eff.explainNow(s.b),'CTR (всё время): 5% → 50\nПодписок на 1000 просмотров (всё время): 9 → 100\nДлина просмотра (всё время): 5:00 → 100');
+  assert.equal(eff.explainNow(s.b),'CTR (всё время): 5% → 50, вес 70%\nПодписок на 1000 просмотров (всё время): 9 → 100, вес 20%\nДлина просмотра (всё время): 5:00 → 100, вес 10%');
   const same=eff.nowScores({a:v(5,300,0.5,100),b:v(5,300,5000,1e6),c:v(2,100,1)});
   assert.equal(same.a.value,same.b.value);
   const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
-  assert.deepEqual(eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7'])]})}),{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7}});
+  assert.deepEqual(eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7','30,5 %','12'])]})}),{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7,avp:30.5,shares:12}});
 });
 test('«Сейчас» covers the last 4 California days before yesterday, as Studio counts its days',()=>{
   const r=eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(Number);
@@ -110,5 +110,18 @@ test('«Сейчас» covers the last 4 California days before yesterday, as St
   assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-05T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
   const s=eff.nowScores({a:{views:25,impr:900,ctr:5,avd:200,subs:1},b:{views:25,impr:900,ctr:3,avd:100,subs:0},q:{views:10,impr:300,ctr:9,avd:900,subs:5}},eff.MIN_RECENT_VIEWS);
   assert.equal(s.a.value,100);assert.equal(s.q,undefined);
-  assert.match(eff.explainNow(s.a,'4 дня'),/^CTR \(4 дня\): 5% → 100\n/);
+  assert.match(eff.explainNow(s.a,'4 дня'),/^CTR \(4 дня\): 5% → 100, вес 70%\n/);
+});
+test('each channel gets its own weights from how its measures follow views (Космос: subscribers and shares, not CTR)',()=>{
+  // Космос PRO lifetime report, 22 November 2026: views, impressions, CTR, view length, subscribers, % viewed, shares.
+  const rows=[[150052,1299495,3.7,669,400,38.2,169],[55641,311611,5.7,443,179,43.7,80],[11069,82459,4.1,717,34,47.3,8],[8779,88009,2.6,584,35,48.1,38],
+    [8330,55922,4.5,453,22,43.8,16],[5204,35192,4.3,404,12,39.5,4],[3719,20548,4.5,630,6,46.7,3],[1081,7430,2.9,611,1,52.5,0]];
+  const byId=Object.fromEntries(rows.map((r,i)=>['v'+i,{views:r[0],impr:r[1],ctr:r[2],avd:r[3],subs:r[4],avp:r[5],shares:r[6]}]));
+  const L=eff.learnWeights(byId);
+  assert.equal(L.learned,true);assert.equal(L.weights.avp,0);
+  assert.ok(L.weights.subs>L.weights.ctr&&L.weights.shares>L.weights.ctr);
+  const s=eff.nowScores(byId,100,L.weights);
+  assert.ok(eff.spearman(Object.values(s).map(r=>r.value),Object.values(s).map(r=>r.views))>0.6);
+  assert.equal(eff.learnWeights({a:byId.v0,b:byId.v1}).learned,false);
+  assert.ok(Math.abs(eff.spearman([1,2,3],[3,2,1])+1)<1e-12);
 });
