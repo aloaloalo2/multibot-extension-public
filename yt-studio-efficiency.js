@@ -126,8 +126,8 @@
     }
     return result;
   }
-  function nowScores(byId) {
-    const known = Object.entries(byId || {}).filter(([, v]) => v.views >= MIN_NOW_VIEWS && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
+  function nowScores(byId, minViews = MIN_NOW_VIEWS) {
+    const known = Object.entries(byId || {}).filter(([, v]) => v.views >= minViews && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
     const rank = (key, value) => {
       if (known.length < 2) return 50;
       const all = known.map(([, , m]) => m[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
@@ -140,30 +140,31 @@
     }
     return result;
   }
-  function explainNow(result) {
-    return result.parts.map(p => `${p.label} (всё время): ${one(p.value)} → ${Math.round(p.points)}`).join('\n');
+  function explainNow(result, period = 'всё время') {
+    return result.parts.map(p => `${p.label} (${period}): ${one(p.value)} → ${Math.round(p.points)}`).join('\n');
   }
-  // One «Эффективность»: the whole life counts 80%, the first 48 hours 20% (author, 22 November 2026: the biggest hits
-  // of the channels started quietly and took off days later; a new channel can have nothing in its first two days).
-  // A part that is missing (too few views, an unread start) leaves the other one alone.
-  const WEIGHTS = { now: 0.8, early: 0.2 };
-  function combined(record) {
-    const early = scores(record?.early), now = nowScores(record?.now), result = {};
-    for (const id of new Set([...Object.keys(early), ...Object.keys(now)])) {
-      const parts = [['now', now[id]], ['early', early[id]]].filter(([, r]) => r);
-      const weight = parts.reduce((a, [k]) => a + WEIGHTS[k], 0);
-      result[id] = { value: Math.round(parts.reduce((a, [k, r]) => a + r.value * WEIGHTS[k], 0) / weight), now: now[id], early: early[id] };
+  // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
+  // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
+  // `time_period=<start ms>,<end ms>`.
+  const RECENT_DAYS = 4, MIN_RECENT_VIEWS = 20;
+  function pacificMidnight(now, daysBack) {
+    // Studio's days start at midnight in California (08:00 UTC in winter, 07:00 in summer).
+    const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(now)).split('-').map(Number);
+    for (const h of [8, 7]) {
+      const t = Date.UTC(y, m - 1, d - daysBack, h);
+      if (new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)) === '00') return t;
     }
-    return result;
+    return Date.UTC(y, m - 1, d - daysBack, 8);
   }
-  function explainCombined(r) {
-    const block = (title, s, weight) => [`${title}: ${s.value} (вес ${Math.round(weight * 100)}%)`, ...s.parts.map(p => `${p.label}: ${one(p.value)} → ${Math.round(p.points)}`)];
-    const lines = [];
-    if (r.now) lines.push(...block('За всё время', r.now, r.early ? WEIGHTS.now : 1)); else lines.push(`За всё время: меньше ${MIN_NOW_VIEWS} просмотров, не учитывается`);
-    if (r.early) lines.push(...block('Первые 48 ч', r.early, r.now ? WEIGHTS.early : 1)); else lines.push('Первые 48 ч: не прочитаны');
-    return lines.join('\n');
+  function recentRange(now = Date.now()) {
+    return `${pacificMidnight(now, 1 + RECENT_DAYS)},${pacificMidnight(now, 1)}`;
   }
-  const api = { sessionIndex, combined, explainCombined, WEIGHTS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  function recentUrl(channelId, now = Date.now()) {
+    const u = new URL(weekUrl(channelId));
+    u.searchParams.set('time_period', recentRange(now));
+    return u.href;
+  }
+  const api = { sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -174,8 +175,10 @@
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
   style.textContent = `[${ROOT}]{flex:0 0 150px!important;width:150px!important;min-width:150px!important;max-width:150px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
-    [${ROOT}=cell]{align-items:flex-start!important;padding-top:12px!important}
-    [${ROOT}=cell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
+    [${ROOT}=cell],[${ROOT}=nowcell]{align-items:flex-start!important;padding-top:12px!important}
+    [${ROOT}=nowhead],[${ROOT}=nowcell]{flex-basis:100px!important;width:100px!important;min-width:100px!important;max-width:100px!important}
+    [${ROOT}=nowhead]{align-items:center!important}
+    [${ROOT}=cell] b,[${ROOT}=nowcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
     [${ROOT}=cell] b[data-partial]{opacity:.6}
     [${ROOT}=head]{align-items:center!important;gap:4px;white-space:nowrap}
     [${ROOT}=head] button{border:0;background:transparent;color:var(--yt-spec-text-secondary,#aaa);cursor:pointer;font-size:14px;line-height:14px;padding:2px}
@@ -199,36 +202,43 @@
       head.append(label, button);
     }
     if (head.previousElementSibling !== last) last.after(head);
-    head.parentElement.querySelector(`[${ROOT}=nowhead]`)?.remove();
-    const button = head.querySelector('button'), left = missing(pageIds(), record?.early).length;
+    let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
+    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
+    if (nowHead.previousElementSibling !== head) head.after(nowHead);
+    nowHead.title = `Те же показатели за последние ${RECENT_DAYS} дня с данными (Studio отдаёт дни с задержкой в два дня), по сравнению с другими роликами канала.` +
+      (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
+    const button = head.querySelector('button');
     button.disabled = !!record?.loading;
     // A failed refresh shows ⚠ in place of ↻: its reason is in the tooltip, a click tries again.
     const mark = record?.error && !record?.loading ? '⚠' : '↻';
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
     head.title = 'Секунды просмотра на показ (70%) и подписки на 1000 просмотров (30%) по сравнению с другими роликами канала: ' +
-      'показатели за всё время дают 80% оценки, первые 48 часов 20%. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить показатели за всё время${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
+      'за всё время. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить «Эффективность» и «Сейчас»';
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const all = combined(record);
+    const all = nowScores(record?.now), recent = nowScores(record?.recent, MIN_RECENT_VIEWS);
+    const paint = (cell, r) => {
+      const b = cell.firstChild, label = r ? String(r.value) : '—';
+      if (b.textContent !== label) b.textContent = label;
+      const [bg, fg] = r ? color(r.value) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
+      b.style.background = bg; b.style.color = fg;
+    };
+    const make = (kind) => { const c = document.createElement('div'); c.setAttribute(ROOT, kind); c.className = 'cell-body'; c.append(document.createElement('b')); return c; };
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
-      let cell = last.parentElement.querySelector(`[${ROOT}=cell]`);
-      if (!cell) { cell = document.createElement('div'); cell.setAttribute(ROOT, 'cell'); cell.className = 'cell-body'; cell.append(document.createElement('b')); }
+      const cell = last.parentElement.querySelector(`[${ROOT}=cell]`) || make('cell');
       if (cell.previousElementSibling !== last) last.after(cell);
-      cell.parentElement.querySelector(`[${ROOT}=nowcell]`)?.remove();
+      const nowCell = cell.parentElement.querySelector(`[${ROOT}=nowcell]`) || make('nowcell');
+      if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
       const id = [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
-      const result = all[id], b = cell.firstChild;
-      const label = result ? String(result.value) : '—';
-      if (b.textContent !== label) b.textContent = label;
-      const [bg, fg] = result ? color(result.value) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
-      b.style.background = bg; b.style.color = fg;
-      b.toggleAttribute('data-partial', !result?.now && !!result?.early?.partial);
-      cell.title = result ? explainCombined(result) : !record?.now && !record?.early ? 'Нажмите ↻ в заголовке «Эффективность».' :
-        `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время и меньше ${MIN_EARLY_VIEWS} за первые 48 часов.`;
+      paint(cell, all[id]); paint(nowCell, recent[id]);
+      cell.title = all[id] ? explainNow(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «Эффективность».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
+      nowCell.title = recent[id] ? explainNow(recent[id], `${RECENT_DAYS} дня`) : !record?.recent ? 'Нажмите ↻ в заголовке «Эффективность».' :
+        `За последние ${RECENT_DAYS} дня меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;
     }
   }
   function draw() { if (!document.querySelector('ytcp-video-row')) return; header(); rows(); }
@@ -245,10 +255,9 @@
   }
   async function refresh() {
     if (!ctx || record?.loading) return;
-    const ids = missing(pageIds(), record?.early);
     record = { ...record, loading: true, error: '' }; draw();
     try {
-      const reply = await send({ type: 'mbEfficiencyRefresh', context: { ...ctx, ids } });
+      const reply = await send({ type: 'mbEfficiencyRefresh', context: { ...ctx, ids: [] } });
       record = reply?.ok ? reply.record : { ...record, loading: false, error: reply?.error || 'Не удалось обновить. Нажмите ещё раз.' };
     } catch { record = { ...record, loading: false, error: 'Перезагрузите страницу после обновления расширения.' }; }
     draw();

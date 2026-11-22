@@ -51,6 +51,21 @@
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
     return account(u, authuser);
   }
+  // The last 4 days with data (yt-studio-efficiency.js recentRange): Studio's daily data ends two days back.
+  function recentUrl(channelId, authuser, now = Date.now()) {
+    const u = new URL(weekUrl(channelId, authuser));
+    u.searchParams.set('time_period', `${pacificMidnight(now, 5)},${pacificMidnight(now, 1)}`);
+    return u.href;
+  }
+  function pacificMidnight(now, daysBack) {
+    // Studio's days start at midnight in California (08:00 UTC in winter, 07:00 in summer).
+    const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(now)).split('-').map(Number);
+    for (const h of [8, 7]) {
+      const t = Date.UTC(y, m - 1, d - daysBack, h);
+      if (new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', hourCycle: 'h23' }).format(new Date(t)) === '00') return t;
+    }
+    return Date.UTC(y, m - 1, d - daysBack, 8);
+  }
   function cleanNow(input) {
     const result = {};
     for (const [id, v] of Object.entries(input || {}).slice(0, 2000)) {
@@ -158,7 +173,8 @@
     job.mode = job.modes.shift();
     job.nonce = crypto.randomUUID();
     const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6), job.context.authuser) :
-      job.mode === 'now' ? weekUrl(job.context.channelId, job.context.authuser) : job.context[job.mode + 'Url'];
+      job.mode === 'now' ? weekUrl(job.context.channelId, job.context.authuser) :
+      job.mode === 'recent' ? recentUrl(job.context.channelId, job.context.authuser) : job.context[job.mode + 'Url'];
     job.url = url;
     await chrome.storage.session.set({ mbStudioSummaryCollector: {
       tabId: job.tabId, channelId: job.context.channelId, started: Date.now(), url } });
@@ -195,7 +211,7 @@
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, cleanEarly, cleanNow, dayUrl, weekUrl, sameUrl, validUrl, validate };
+    module.exports = { cleanMetrics, cleanEarly, cleanNow, dayUrl, weekUrl, recentUrl, sameUrl, validUrl, validate };
     return;
   }
   const ready = (async () => {
@@ -215,7 +231,7 @@
       // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
-      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['now', ...(message.context?.ids?.map?.(id => 'early:' + id) || [])]);
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['now', 'recent']);
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {
@@ -227,6 +243,11 @@
       if (message.denied) {
         job.modes = [];
         await finish('Studio сейчас открыт на другом канале, и отчёты этого канала недоступны. Переключитесь на этот канал через аватар → «Сменить аккаунт» и нажмите ↻ ещё раз.');
+        return { ok: true };
+      }
+      if (job.mode === 'recent') {
+        await merge(job.context, {}, { recent: cleanNow(message.now), recentAt: Date.now() });
+        await next();
         return { ok: true };
       }
       if (job.mode === 'now') {

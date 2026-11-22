@@ -188,7 +188,7 @@
   function channelScore(effRecord, days, now = Date.now()) {
     const scale = globalThis.__mbEfficiency || (typeof require === 'function' ? require('./yt-studio-efficiency.js') : null);
     if (!scale || !days || !effRecord?.early) return null;
-    const all = scale.combined(effRecord), since = now - days * 86400000;
+    const all = scale.nowScores(effRecord.now), since = now - days * 86400000;
     const inside = Object.entries(all).filter(([id]) => effRecord.early[id]?.date && Date.parse(effRecord.early[id].date) >= since);
     if (!inside.length) return null;
     const value = Math.round(inside.reduce((a, [, s]) => a + s.value, 0) / inside.length);
@@ -300,9 +300,10 @@
         return;
       }
       if (!home.includes('/channel/' + job.context.channelId)) return;
-      if (job.mode === 'now') {
-        // «Эффективность»: the channel's videos over their whole life.
-        if (new URL(location.href).searchParams.get('time_period') !== 'lifetime') return;
+      if (job.mode === 'now' || job.mode === 'recent') {
+        // «Эффективность» (the whole life) and «Сейчас» (the last 4 days with data): one report of the channel's videos.
+        const period = new URL(location.href).searchParams.get('time_period') || '';
+        if (job.mode === 'now' ? period !== 'lifetime' : !/^\d+,\d+$/.test(period)) return;
         const now = globalThis.__mbEfficiency?.readWeek(document) || {}, signature = JSON.stringify(now);
         repeats = signature === stable ? repeats + 1 : 0; stable = signature;
         if ((!Object.keys(now).length && Date.now() - started < 20000) || (Object.keys(now).length && repeats < 2)) return;

@@ -49,43 +49,6 @@ test('the efficiency request is valid only from its own channel Content page and
   const clean=cleanEarly({WA8pO04HUwA:{days:2,views:5,impr:50,ctr:4,avd:1.5,subs:0,date:'2026-11-01',evil:1},svFNQL7zzzz:{days:2,views:9}},['WA8pO04HUwA']);
   assert.deepEqual(clean,{WA8pO04HUwA:{days:2,date:'2026-11-01',views:5,impr:50,subs:0,ctr:4,avd:1.5}});
 });
-test('the Insights channel score is the mean of the scores of videos released in the period',()=>{
-  const now=Date.parse('2026-11-22');
-  const v=(ctr,date)=>({days:2,views:1000,impr:20000,ctr,avd:300,subs:5,date});
-  const rec={early:{a:v(10,'2026-11-20'),b:v(2,'2026-11-18'),old:v(5,'2026-09-01')}};
-  const r=channelScore(rec,7,now);
-  const s=eff.scores(rec.early);
-  assert.equal(r.value,Math.round((s.a.value+s.b.value)/2));assert.match(r.explain,/2 роликам/);
-  assert.equal(channelScore(rec,90,now).explain.match(/(\d+) роликам/)[1],'3');
-  assert.equal(channelScore({early:{}},7,now),null);assert.equal(channelScore(null,7,now),null);
-});
-test('one refresh walks the collector tab through each listed video report and keeps their first two days',async()=>{
-  const fs=require('node:fs'),vm=require('node:vm');
-  const local={},session={},listeners=[],created=[],updated=[],closed=[],tabs=new Map();
-  const area=state=>({get:async key=>({[key]:structuredClone(state[key])}),set:async obj=>Object.assign(state,structuredClone(obj)),remove:async key=>delete state[key]});
-  const chrome={storage:{local:area(local),session:area(session)},runtime:{onMessage:{addListener:f=>listeners.push(f)}},
-    tabs:{create:async o=>{created.push(o);const t={id:801,...o};tabs.set(801,t);return t;},update:async(id,o)=>{updated.push(o);tabs.set(id,{id,...o});},remove:async id=>closed.push(id),get:async id=>tabs.get(id),onRemoved:{addListener(){}}},
-    debugger:{attach:async()=>{},sendCommand:async()=>{},detach:async()=>{},onDetach:{addListener(){}}}};
-  vm.runInContext(fs.readFileSync(require.resolve('../yt-studio-summary-worker.js'),'utf8'),vm.createContext({chrome,URL,Date,crypto:require('node:crypto').webcrypto,setTimeout:()=>1,clearTimeout(){},console}));
-  const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
-  const ctx={...eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}),ids:['WA8pO04HUwA','svFNQL7-4zo']};
-  const call=(m,id=9,url=page)=>new Promise(r=>listeners[0](m,{tab:{id,url}},r));
-  await call({type:'mbEfficiencyRefresh',context:ctx});await new Promise(setImmediate);
-  assert.equal(created[0].url,eff.weekUrl(channel));
-  let probe=await call({type:'mbStudioSummaryProbe'},801,created[0].url);
-  assert.equal(probe.collector.mode,'now');
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',now:{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:3},'bad':{impr:1,views:1}}},801,created[0].url);
-  assert.equal(updated[0].url,eff.dayUrl(channel,'WA8pO04HUwA'));
-  probe=await call({type:'mbStudioSummaryProbe'},801,updated[0].url);
-  assert.equal(probe.collector.mode,'early:WA8pO04HUwA');
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',early:{WA8pO04HUwA:{days:2,views:588,impr:4836,ctr:5.6,avd:215,subs:2},svFNQL7zzzz:{days:2,views:1}}},801,updated[0].url);
-  assert.equal(updated[1].url,eff.dayUrl(channel,'svFNQL7-4zo'));
-  probe=await call({type:'mbStudioSummaryProbe'},801,updated[1].url);
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',early:{}},801,updated[1].url);
-  const rec=local['mbEfficiency:'+channel];
-  assert.deepEqual(Object.keys(rec.early),['WA8pO04HUwA']);assert.deepEqual(Object.keys(rec.now),['WA8pO04HUwA']);
-  assert.equal(rec.loading,false);assert.deepEqual(closed,[801]);
-});
 test('the whole-life part uses the first-48-hours formula; videos with few views are not scored',()=>{
   const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
   const s=eff.nowScores({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20),quiet:{views:90,impr:1500,ctr:9,avd:900,subs:9}});
@@ -127,13 +90,35 @@ test('the collector tab opens the channel under its own Google account (authuser
   assert(validate({...ctx,ids:[]},page));assert(!validate({...ctx,ids:[],authuser:'1'},page));
   assert.equal(eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}).authuser,undefined);
 });
-test('one «Эффективность»: the whole life counts 80%, the first 48 hours 20%; a missing part leaves the other alone',()=>{
-  const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
-  const rec={now:{a:v(10,300,10),b:v(2,100,0)},early:{a:{...v(2,100,0),days:2},b:{...v(10,300,10),days:2},c:{...v(5,200,5),days:2}}};
-  const c=eff.combined(rec);
-  assert.equal(c.a.value,Math.round(.8*c.a.now.value+.2*c.a.early.value));
-  assert.equal(c.a.value,Math.round(.8*c.a.now.value));
-  assert.equal(c.c.value,c.c.early.value);assert.equal(c.c.now,undefined);
-  assert.match(eff.explainCombined(c.a),/^За всё время: \d+ \(вес 80%\)\n.*\nПервые 48 ч: \d+ \(вес 20%\)/s);
-  assert.match(eff.explainCombined(c.c),/^За всё время: меньше 100 просмотров, не учитывается\nПервые 48 ч: \d+ \(вес 100%\)/);
+test('one refresh reads two channel reports: the whole life, then the last 4 days',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm');
+  const local={},session={},listeners=[],created=[],updated=[],closed=[],tabs=new Map();
+  const area=state=>({get:async key=>({[key]:structuredClone(state[key])}),set:async obj=>Object.assign(state,structuredClone(obj)),remove:async key=>delete state[key]});
+  const chrome={storage:{local:area(local),session:area(session)},runtime:{onMessage:{addListener:f=>listeners.push(f)}},
+    tabs:{create:async o=>{created.push(o);const t={id:801,...o};tabs.set(801,t);return t;},update:async(id,o)=>{updated.push(o);tabs.set(id,{id,...o});},remove:async id=>closed.push(id),get:async id=>tabs.get(id),onRemoved:{addListener(){}}},
+    debugger:{attach:async()=>{},sendCommand:async()=>{},detach:async()=>{},onDetach:{addListener(){}}}};
+  vm.runInContext(fs.readFileSync(require.resolve('../yt-studio-summary-worker.js'),'utf8'),vm.createContext({chrome,URL,Date,Intl,crypto:require('node:crypto').webcrypto,setTimeout:()=>1,clearTimeout(){},console}));
+  const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
+  const ctx={...eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}),ids:[]};
+  const call=(m,id=9,url=page)=>new Promise(r=>listeners[0](m,{tab:{id,url}},r));
+  await call({type:'mbEfficiencyRefresh',context:ctx});await new Promise(setImmediate);
+  assert.equal(created[0].url,eff.weekUrl(channel));
+  let probe=await call({type:'mbStudioSummaryProbe'},801,created[0].url);
+  assert.equal(probe.collector.mode,'now');
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',now:{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:3}}},801,created[0].url);
+  assert.equal(new URL(updated[0].url).searchParams.get('time_period'),eff.recentRange());
+  probe=await call({type:'mbStudioSummaryProbe'},801,updated[0].url);
+  assert.equal(probe.collector.mode,'recent');
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'early',now:{'svFNQL7-4zo':{views:50,impr:900,ctr:4,avd:200,subs:1}}},801,updated[0].url);
+  const rec=local['mbEfficiency:'+channel];
+  assert.deepEqual(Object.keys(rec.now),['WA8pO04HUwA']);assert.deepEqual(Object.keys(rec.recent),['svFNQL7-4zo']);
+  assert.equal(rec.loading,false);assert.deepEqual(closed,[801]);
+});
+test('«Сейчас» covers the last 4 California days before yesterday, as Studio counts its days',()=>{
+  const r=eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(Number);
+  assert.deepEqual(r.map(x=>new Date(x).toISOString()),['2026-11-17T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
+  assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-05T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
+  const s=eff.nowScores({a:{views:25,impr:900,ctr:5,avd:200,subs:1},b:{views:25,impr:900,ctr:3,avd:100,subs:0},q:{views:10,impr:300,ctr:9,avd:900,subs:5}},eff.MIN_RECENT_VIEWS);
+  assert.equal(s.a.value,100);assert.equal(s.q,undefined);
+  assert.equal(eff.explainNow(s.a,'4 дня'),'Секунд просмотра на показ (4 дня): 10 → 100\nПодписок на 1000 просмотров (4 дня): 40 → 100');
 });
