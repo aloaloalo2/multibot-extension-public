@@ -142,6 +142,15 @@
     for (let i = 0; i < n; i++) { sxy += (rx[i] - mx) * (ry[i] - my); sx += (rx[i] - mx) ** 2; sy += (ry[i] - my) ** 2; }
     return sx && sy ? sxy / Math.sqrt(sx * sy) : 0;
   }
+  // How often the score orders two videos of the channel the same way as their views: 50% is a coin, 100% always.
+  function agreement(score, views) {
+    let same = 0, total = 0;
+    for (let i = 0; i < score.length; i++) for (let j = i + 1; j < score.length; j++) {
+      if (score[i] === score[j] || views[i] === views[j]) continue;
+      total++; if ((score[i] - score[j]) * (views[i] - views[j]) > 0) same++;
+    }
+    return total ? same / total * 100 : null;
+  }
   // The channel's own weights from its lifetime report: each measure's rank correlation with views, negatives dropped.
   function learnWeights(byId, minViews = MIN_NOW_VIEWS) {
     const known = Object.values(byId || {}).filter(v => v.views >= minViews).map(v => [v, measures(v)]).filter(([, m]) => m);
@@ -199,7 +208,7 @@
     u.searchParams.set('time_period', recentRange(now));
     return u.href;
   }
-  const api = { learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
+  const api = { agreement, learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -251,10 +260,10 @@
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
     const learned = learnWeights(record?.now), all = nowScores(record?.now, MIN_NOW_VIEWS, learned.weights);
     const shown = Object.values(all).filter(r => Number.isFinite(r.views));
-    const match = shown.length >= LEARN_MIN ? Math.round(spearman(shown.map(r => r.value), shown.map(r => r.views)) * 100) : null;
+    const match = shown.length >= LEARN_MIN ? agreement(shown.map(r => r.value), shown.map(r => r.views)) : null;
     const weightsText = MEASURES.filter(([, k]) => learned.weights[k] > 0).map(([label, k]) => `${label} ${Math.round(learned.weights[k] * 100)}%`).join(', ');
     head.title = `Формула этого канала: ${weightsText}.` + (learned.learned ? ` Веса подобраны по ${learned.n} роликам канала: чем сильнее показатель идёт вместе с просмотрами, тем больше его вес. Сами просмотры в оценку не входят.` : ' Роликов мало, веса общие.') +
-      (match !== null ? `\nСовпадение с просмотрами: ${match > 0 ? '+' : ''}${match} из 100.` : '') +
+      (match !== null ? `\nСовпадение с просмотрами: ${Math.round(match)}% (из двух роликов у того, чья оценка выше, больше просмотров; 50% — наугад).` : '') +
       (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
     button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить «Эффективность» и «Сейчас»';
     button.setAttribute('aria-label', button.title);

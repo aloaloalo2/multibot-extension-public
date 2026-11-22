@@ -125,3 +125,7 @@ test('each channel gets its own weights from how its measures follow views (Ко
   assert.equal(eff.learnWeights({a:byId.v0,b:byId.v1}).learned,false);
   assert.ok(Math.abs(eff.spearman([1,2,3],[3,2,1])+1)<1e-12);
 });
+test('agreement is the share of video pairs ordered like their views (50% is chance)',()=>{
+  assert.equal(eff.agreement([1,2,3],[10,20,30]),100);assert.equal(eff.agreement([3,2,1],[10,20,30]),0);
+  assert.ok(Math.abs(eff.agreement([1,3,2],[10,20,30])-200/3)<1e-9);assert.equal(eff.agreement([1],[1]),null);
+});
