@@ -100,14 +100,14 @@
   function missing(ids, earlyById) {
     return [...new Set(ids)].filter(id => /^[\w-]{11}$/.test(id) && !(earlyById?.[id]?.days >= EARLY_DAYS)).slice(0, MAX_IDS);
   }
-  // «Сейчас»: the same formula as «Эффективность» (seconds watched per impression 70%, subscribers per 1000 views 30%,
-  // ranked inside the channel), on the last 7 days instead of the first 48 hours (author, 22 November 2026: the two
-  // columns must be comparable). Videos YouTube hardly shows this week are not scored.
+  // The whole life of a video: the same measures (seconds watched per impression 70%, subscribers per 1000 views 30%,
+  // ranked inside the channel) over all its days, from one lifetime report of the channel (author, 22 November 2026:
+  // the score judges the whole video, not only its current week).
   const WEEK_METRICS = ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE'];
-  const MIN_NOW_IMPRESSIONS = 200;
+  const MIN_NOW_VIEWS = 100;   // the whole life: a video needs at least this many views to be judged
   function weekUrl(channelId) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
-    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
+    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
     for (const m of WEEK_METRICS) u.searchParams.append('t_metrics', m);
     u.searchParams.set('dimension', 'VIDEO');
@@ -127,7 +127,7 @@
     return result;
   }
   function nowScores(byId) {
-    const known = Object.entries(byId || {}).filter(([, v]) => v.impr >= MIN_NOW_IMPRESSIONS && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
+    const known = Object.entries(byId || {}).filter(([, v]) => v.views >= MIN_NOW_VIEWS && Number.isFinite(v.subs)).map(([id, v]) => [id, v, measures(v)]).filter(([, , m]) => m);
     const rank = (key, value) => {
       if (known.length < 2) return 50;
       const all = known.map(([, , m]) => m[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
@@ -141,12 +141,11 @@
     return result;
   }
   function explainNow(result) {
-    return result.parts.map(p => `${p.label} (7 дн): ${one(p.value)} → ${Math.round(p.points)}`).join('\n') +
-      `\nПоказов за 7 дней: ${new Intl.NumberFormat('ru-RU').format(result.impr)}`;
+    return result.parts.map(p => `${p.label} (всё время): ${one(p.value)} → ${Math.round(p.points)}`).join('\n');
   }
-  // One «Эффективность»: the last 7 days count 80%, the first 48 hours 20% (author, 22 November 2026: the biggest hits
+  // One «Эффективность»: the whole life counts 80%, the first 48 hours 20% (author, 22 November 2026: the biggest hits
   // of the channels started quietly and took off days later; a new channel can have nothing in its first two days).
-  // A part that is missing (a quiet week, an unread start) leaves the other one alone.
+  // A part that is missing (too few views, an unread start) leaves the other one alone.
   const WEIGHTS = { now: 0.8, early: 0.2 };
   function combined(record) {
     const early = scores(record?.early), now = nowScores(record?.now), result = {};
@@ -160,7 +159,7 @@
   function explainCombined(r) {
     const block = (title, s, weight) => [`${title}: ${s.value} (вес ${Math.round(weight * 100)}%)`, ...s.parts.map(p => `${p.label}: ${one(p.value)} → ${Math.round(p.points)}`)];
     const lines = [];
-    if (r.now) lines.push(...block('За 7 дней', r.now, r.early ? WEIGHTS.now : 1)); else lines.push(`За 7 дней: меньше ${MIN_NOW_IMPRESSIONS} показов, не учитывается`);
+    if (r.now) lines.push(...block('За всё время', r.now, r.early ? WEIGHTS.now : 1)); else lines.push(`За всё время: меньше ${MIN_NOW_VIEWS} просмотров, не учитывается`);
     if (r.early) lines.push(...block('Первые 48 ч', r.early, r.now ? WEIGHTS.early : 1)); else lines.push('Первые 48 ч: не прочитаны');
     return lines.join('\n');
   }
@@ -208,8 +207,8 @@
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
     head.title = 'Секунды просмотра на показ (70%) и подписки на 1000 просмотров (30%) по сравнению с другими роликами канала: ' +
-      'последние 7 дней дают 80% оценки, первые 48 часов 20%. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные за 7 дней: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить последние 7 дней${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
+      'показатели за всё время дают 80% оценки, первые 48 часов 20%. Просмотры не учитываются.' + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить показатели за всё время${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
@@ -229,7 +228,7 @@
       b.style.background = bg; b.style.color = fg;
       b.toggleAttribute('data-partial', !result?.now && !!result?.early?.partial);
       cell.title = result ? explainCombined(result) : !record?.now && !record?.early ? 'Нажмите ↻ в заголовке «Эффективность».' :
-        `Мало данных: меньше ${MIN_NOW_IMPRESSIONS} показов за 7 дней и меньше ${MIN_EARLY_VIEWS} просмотров за первые 48 часов.`;
+        `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время и меньше ${MIN_EARLY_VIEWS} за первые 48 часов.`;
     }
   }
   function draw() { if (!document.querySelector('ytcp-video-row')) return; header(); rows(); }

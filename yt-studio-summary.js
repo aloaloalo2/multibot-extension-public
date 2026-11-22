@@ -301,8 +301,8 @@
       }
       if (!home.includes('/channel/' + job.context.channelId)) return;
       if (job.mode === 'now') {
-        // «Сейчас»: the channel's videos over the last 7 days.
-        if (new URL(location.href).searchParams.get('time_period') !== 'week') return;
+        // «Эффективность»: the channel's videos over their whole life.
+        if (new URL(location.href).searchParams.get('time_period') !== 'lifetime') return;
         const now = globalThis.__mbEfficiency?.readWeek(document) || {}, signature = JSON.stringify(now);
         repeats = signature === stable ? repeats + 1 : 0; stable = signature;
         if ((!Object.keys(now).length && Date.now() - started < 20000) || (Object.keys(now).length && repeats < 2)) return;

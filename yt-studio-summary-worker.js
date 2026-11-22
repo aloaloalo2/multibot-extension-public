@@ -43,7 +43,7 @@
   }
   function weekUrl(channelId, authuser) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
-    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
+    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
     for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_TIME', 'SUBSCRIBERS_NET_CHANGE']) u.searchParams.append('t_metrics', m);
     u.searchParams.set('dimension', 'VIDEO');

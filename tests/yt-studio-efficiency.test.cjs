@@ -86,13 +86,13 @@ test('one refresh walks the collector tab through each listed video report and k
   assert.deepEqual(Object.keys(rec.early),['WA8pO04HUwA']);assert.deepEqual(Object.keys(rec.now),['WA8pO04HUwA']);
   assert.equal(rec.loading,false);assert.deepEqual(closed,[801]);
 });
-test('«Сейчас» uses the «Эффективность» formula on the last 7 days; quiet videos are not scored',()=>{
+test('the whole-life part uses the first-48-hours formula; videos with few views are not scored',()=>{
   const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
-  const s=eff.nowScores({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20),quiet:{views:10,impr:150,ctr:9,avd:900,subs:9}});
+  const s=eff.nowScores({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20),quiet:{views:90,impr:1500,ctr:9,avd:900,subs:9}});
   const e=eff.scores(Object.fromEntries(Object.entries({a:v(10,300,10),b:v(5,300,5),c:v(2,100,0),d:v(4,200,20)}).map(([k,x])=>[k,{...x,days:2}])));
   for (const k of ['a','b','c','d']) assert.equal(s[k].value,e[k].value);
   assert.equal(s.quiet,undefined);
-  assert.equal(eff.explainNow(s.a),'Секунд просмотра на показ (7 дн): 30 → 100\nПодписок на 1000 просмотров (7 дн): 10 → 67\nПоказов за 7 дней: 20 000');
+  assert.equal(eff.explainNow(s.a),'Секунд просмотра на показ (всё время): 30 → 100\nПодписок на 1000 просмотров (всё время): 10 → 67');
   const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
   const w=eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7']),{querySelector:()=>null,querySelectorAll:()=>[]}]})});
   assert.deepEqual(w,{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7}});
@@ -127,13 +127,13 @@ test('the collector tab opens the channel under its own Google account (authuser
   assert(validate({...ctx,ids:[]},page));assert(!validate({...ctx,ids:[],authuser:'1'},page));
   assert.equal(eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}).authuser,undefined);
 });
-test('one «Эффективность»: the last 7 days count 80%, the first 48 hours 20%; a missing part leaves the other alone',()=>{
+test('one «Эффективность»: the whole life counts 80%, the first 48 hours 20%; a missing part leaves the other alone',()=>{
   const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
   const rec={now:{a:v(10,300,10),b:v(2,100,0)},early:{a:{...v(2,100,0),days:2},b:{...v(10,300,10),days:2},c:{...v(5,200,5),days:2}}};
   const c=eff.combined(rec);
   assert.equal(c.a.value,Math.round(.8*c.a.now.value+.2*c.a.early.value));
   assert.equal(c.a.value,Math.round(.8*c.a.now.value));
   assert.equal(c.c.value,c.c.early.value);assert.equal(c.c.now,undefined);
-  assert.match(eff.explainCombined(c.a),/^За 7 дней: \d+ \(вес 80%\)\n.*\nПервые 48 ч: \d+ \(вес 20%\)/s);
-  assert.match(eff.explainCombined(c.c),/^За 7 дней: меньше 200 показов, не учитывается\nПервые 48 ч: \d+ \(вес 100%\)/);
+  assert.match(eff.explainCombined(c.a),/^За всё время: \d+ \(вес 80%\)\n.*\nПервые 48 ч: \d+ \(вес 20%\)/s);
+  assert.match(eff.explainCombined(c.c),/^За всё время: меньше 100 просмотров, не учитывается\nПервые 48 ч: \d+ \(вес 100%\)/);
 });
