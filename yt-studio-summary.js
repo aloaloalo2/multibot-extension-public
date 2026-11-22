@@ -188,8 +188,8 @@
   function channelScore(effRecord, days, now = Date.now()) {
     const scale = globalThis.__mbEfficiency || (typeof require === 'function' ? require('./yt-studio-efficiency.js') : null);
     if (!scale || !days || !effRecord?.early) return null;
-    const all = scale.scores(effRecord.early), since = now - days * 86400000;
-    const inside = Object.entries(all).filter(([id, s]) => !s.partial && effRecord.early[id]?.date && Date.parse(effRecord.early[id].date) >= since);
+    const all = scale.combined(effRecord), since = now - days * 86400000;
+    const inside = Object.entries(all).filter(([id]) => effRecord.early[id]?.date && Date.parse(effRecord.early[id].date) >= since);
     if (!inside.length) return null;
     const value = Math.round(inside.reduce((a, [, s]) => a + s.value, 0) / inside.length);
     const sorted = inside.map(([, s]) => s.value).sort((a, b) => b - a);

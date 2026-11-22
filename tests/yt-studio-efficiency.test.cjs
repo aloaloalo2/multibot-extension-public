@@ -127,3 +127,13 @@ test('the collector tab opens the channel under its own Google account (authuser
   assert(validate({...ctx,ids:[]},page));assert(!validate({...ctx,ids:[],authuser:'1'},page));
   assert.equal(eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}).authuser,undefined);
 });
+test('one «Эффективность»: the last 7 days count 80%, the first 48 hours 20%; a missing part leaves the other alone',()=>{
+  const v=(ctr,avd,subs)=>({views:1000,impr:20000,ctr,avd,subs});
+  const rec={now:{a:v(10,300,10),b:v(2,100,0)},early:{a:{...v(2,100,0),days:2},b:{...v(10,300,10),days:2},c:{...v(5,200,5),days:2}}};
+  const c=eff.combined(rec);
+  assert.equal(c.a.value,Math.round(.8*c.a.now.value+.2*c.a.early.value));
+  assert.equal(c.a.value,Math.round(.8*c.a.now.value));
+  assert.equal(c.c.value,c.c.early.value);assert.equal(c.c.now,undefined);
+  assert.match(eff.explainCombined(c.a),/^За 7 дней: \d+ \(вес 80%\)\n.*\nПервые 48 ч: \d+ \(вес 20%\)/s);
+  assert.match(eff.explainCombined(c.c),/^За 7 дней: меньше 200 показов, не учитывается\nПервые 48 ч: \d+ \(вес 100%\)/);
+});
