@@ -112,20 +112,20 @@ test('the CTR columns show each video CTR with its place among the channel video
   assert.equal(p.a.place,100);assert.equal(p.b.place,50);assert.equal(p.c.place,0);assert.equal(p.q,undefined);assert.equal(p.a.median,4);
   assert.equal(eff.explainCtr(p.a),'CTR за всё время: 6%\nМедиана канала: 4%\nВыше, чем у 100% роликов канала\nПоказов: 9 000');
 });
-test('the first day of a video report is its «первые 24ч», with the publication date',()=>{
+test('the first two days of a video report are its «первые 48ч», with the publication date',()=>{
   const rows=eff.readDays(doc([['Итого','472','4 140','1,4 %','3:39','0'],['2 нояб. 2026 г.','10','72','1,4 %','2:30','0'],['3 нояб. 2026 г.','15','928','0,8 %','3:00','1']]));
   const e=eff.early(rows);
-  assert.equal(e.date,'2026-11-02');assert.equal(e.days,1);assert.equal(e.views,10);assert.equal(e.impr,72);assert.ok(Math.abs(e.ctr-1.4)<1e-9);
+  assert.equal(e.date,'2026-11-02');assert.equal(e.days,2);assert.equal(e.views,25);assert.equal(e.impr,1000);assert.ok(Math.abs(e.ctr-(1.4*72+0.8*928)/1000)<1e-9);
   assert.equal(eff.parseDate('Nov 14, 2026'),'2026-11-14');assert.equal(eff.parseDate('5 лист. 2026 р.'),'2026-11-05');
   assert.equal(eff.early([]),null);
 });
 test('only videos without their first day read are read again, at most 60 (old two-day entries too)',()=>{
   const ids=Array.from({length:70},(_,i)=>'v'+String(i).padStart(10,'0'));
   assert.equal(eff.missing(ids,{}).length,60);
-  assert.deepEqual(eff.missing(['aaaaaaaaaaa','bbbbbbbbbbb','bad'],{aaaaaaaaaaa:{days:1},bbbbbbbbbbb:{days:2}}),['bbbbbbbbbbb']);
+  assert.deepEqual(eff.missing(['aaaaaaaaaaa','bbbbbbbbbbb','bad'],{aaaaaaaaaaa:{days:2},bbbbbbbbbbb:{days:1}}),['bbbbbbbbbbb']);
 });
-test('«сейчас 24ч» covers the last California day before yesterday, as Studio counts its days',()=>{
-  assert.deepEqual(eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-11-20T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
+test('«сейчас 48ч» covers the last 2 California days before yesterday, as Studio counts its days',()=>{
+  assert.deepEqual(eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-11-19T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
   const {recentUrl}=require('../yt-studio-summary-worker.js');
   assert.equal(new URL(recentUrl('UC8oU4MP1dV8FTp33W7Usiyw',0,Date.parse('2026-11-22T10:00:00Z'))).searchParams.get('time_period'),eff.recentRange(Date.parse('2026-11-22T10:00:00Z')));
 });

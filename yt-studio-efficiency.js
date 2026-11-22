@@ -4,7 +4,7 @@
 // Views and impressions never enter the score (author, 22 November 2026).
 (() => {
   const ROOT = 'data-multibot-efficiency';
-  const EARLY_DAYS = 1, MIN_EARLY_VIEWS = 10, MAX_IDS = 60;   // «первые 24ч»: the first day of the video's report
+  const EARLY_DAYS = 2, MIN_EARLY_VIEWS = 10, MAX_IDS = 60;   // «первые 48ч»: the first two days of the video's report
   // Views and impressions are never part of the score. What follows views differs by channel (22 November 2026: CTR on
   // Чичваркин +47, on Космос +7, where subscribers per 1000 views gave +79), so each channel gets its own weights:
   // a measure weighs as much as its rank correlation with the channel's views (negative ones weigh nothing). Checked by
@@ -190,7 +190,7 @@
   // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
   // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
   // `time_period=<start ms>,<end ms>`.
-  const RECENT_DAYS = 1, MIN_RECENT_VIEWS = 10;   // «сейчас 24ч»: the last day with data (author, 22 November 2026)
+  const RECENT_DAYS = 2, MIN_RECENT_VIEWS = 10;   // «сейчас 48ч»: the last two days with data (author, 22 November 2026)
   function pacificMidnight(now, daysBack) {
     // Studio's days start at midnight in California (08:00 UTC in winter, 07:00 in summer).
     const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(now)).split('-').map(Number);
@@ -269,17 +269,17 @@
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
     const places = ctrPlaces(record?.now), first = Object.values(places)[0];
-    head.title = 'CTR ролика: за всё время, за первые 24 часа после публикации и за последние 24 часа с данными (Studio отдаёт дни с задержкой примерно в два дня). ' +
+    head.title = 'CTR ролика: за всё время, за первые 48 часов после публикации и за последние 48 часов с данными (Studio отдаёт дни с задержкой примерно в два дня). ' +
       'Из всех показателей Studio только CTR шёл вместе с просмотрами на всех больших каналах; ' +
       'ролик с CTR ниже медианы канала хитом не становился. Зелёный — выше, чем у 60% роликов канала, красный — ниже, чем у 60%.' +
       (first ? `\nМедиана канала: ${one(first.median)}%` : '') +
       (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить CTR${missing(pageIds(), record?.early).length ? ` и прочитать первые 24 часа: ${missing(pageIds(), record?.early).length} ролик(ов)` : ''}`;
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить CTR${missing(pageIds(), record?.early).length ? ` и прочитать первые 48 часов: ${missing(pageIds(), record?.early).length} ролик(ов)` : ''}`;
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const lines = [['все', ctrPlaces(record?.now), 'за всё время'], ['первые 24ч', ctrPlaces(Object.fromEntries(Object.entries(record?.early || {}).filter(([, e]) => e.days === EARLY_DAYS)), MIN_EARLY_VIEWS), 'за первые 24 часа'],
-      ['сейчас 24ч', ctrPlaces(record?.recent, MIN_RECENT_VIEWS), 'за последние 24 часа']];
+    const lines = [['все', ctrPlaces(record?.now), 'за всё время'], ['первые 48ч', ctrPlaces(Object.fromEntries(Object.entries(record?.early || {}).filter(([, e]) => e.days === EARLY_DAYS)), MIN_EARLY_VIEWS), 'за первые 48 часов'],
+      ['сейчас 48ч', ctrPlaces(record?.recent, MIN_RECENT_VIEWS), 'за последние 48 часов']];
     const idOf = row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
