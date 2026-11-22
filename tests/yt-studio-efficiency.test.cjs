@@ -111,3 +111,16 @@ test('a report of another channel (no access) stops the refresh with a clear ins
   const rec=local['mbEfficiency:'+channel];
   assert.equal(rec.loading,false);assert.match(rec.error,/Сменить аккаунт/);assert.deepEqual(closed,[901]);
 });
+test('the collector tab opens the channel under its own Google account (authuser from the page)',()=>{
+  const {dayUrl,weekUrl,sameUrl}=require('../yt-studio-summary-worker.js');
+  const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
+  const docWith=n=>({querySelector:()=>({getAttribute:()=>`/channel/${channel}`}),querySelectorAll:s=>s==='script'?[{textContent:'x'},{textContent:`ytcfg.set({"SESSION_INDEX":"${n}","X":1})`}]:[]});
+  const ctx=eff.context(page,docWith(1));
+  assert.equal(ctx.authuser,1);
+  assert.equal(new URL(weekUrl(channel,1)).searchParams.get('authuser'),'1');
+  assert.equal(new URL(dayUrl(channel,'WA8pO04HUwA',0)).searchParams.get('authuser'),'0');
+  assert.equal(new URL(dayUrl(channel,'WA8pO04HUwA')).searchParams.get('authuser'),null);
+  assert(sameUrl(weekUrl(channel,1),weekUrl(channel)));assert(!sameUrl(weekUrl(channel,1),dayUrl(channel,'WA8pO04HUwA',1)));
+  assert(validate({...ctx,ids:[]},page));assert(!validate({...ctx,ids:[],authuser:'1'},page));
+  assert.equal(eff.context(page,{querySelector:()=>({getAttribute:()=>`/channel/${channel}`})}).authuser,undefined);
+});

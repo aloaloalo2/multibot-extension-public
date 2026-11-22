@@ -26,7 +26,12 @@
   }
   // One video's day-by-day report (the same address yt-studio-efficiency.js reads). A background tab is hidden, and a
   // frame inside it never rendered its table (22 November 2026), so the collector tab opens each report itself.
-  function dayUrl(channelId, videoId) {
+  // `authuser` picks the Google account that owns the channel: a new tab otherwise opens Studio as the account
+  // chosen last in the avatar menu, and another account's channel reads «нет доступа» (22 November 2026).
+  // Studio drops it from the address once the page has loaded.
+  function account(u, authuser) { if (Number.isInteger(authuser) && authuser >= 0 && authuser < 20) u.searchParams.set('authuser', String(authuser)); return u.href; }
+  function sameUrl(a, b) { try { const x = new URL(a), y = new URL(b); x.searchParams.delete('authuser'); y.searchParams.delete('authuser'); return x.href === y.href; } catch { return false; } }
+  function dayUrl(channelId, videoId, authuser) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
     for (const [k, v] of [['entity_type', 'VIDEO'], ['entity_id', videoId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
       ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
@@ -34,9 +39,9 @@
     u.searchParams.set('dimension', 'DAY');
     u.searchParams.set('o_column', 'DAY');
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_ASC');
-    return u.href;
+    return account(u, authuser);
   }
-  function weekUrl(channelId) {
+  function weekUrl(channelId, authuser) {
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
     for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
@@ -44,7 +49,7 @@
     u.searchParams.set('dimension', 'VIDEO');
     u.searchParams.set('o_column', 'VIDEO_THUMBNAIL_IMPRESSIONS');
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
-    return u.href;
+    return account(u, authuser);
   }
   function cleanNow(input) {
     const result = {};
@@ -73,6 +78,7 @@
     return result;
   }
   function validate(context, senderUrl) {
+    if (context && context.authuser !== undefined && !(Number.isInteger(context.authuser) && context.authuser >= 0 && context.authuser < 20)) return false;
     if (context?.key?.startsWith?.(EFFICIENCY)) return validateEfficiency(context, senderUrl);
     return context && /^UC[\w-]{22}$/.test(context.channelId) &&
       typeof context.key === 'string' && context.key.startsWith(PREFIX + context.channelId + ':') && context.key.length < 600 &&
@@ -98,9 +104,9 @@
     const deadline = Date.now() + 10000;
     while (active === job && !job.finishing) {
       const tab = await chrome.tabs.get(job.tabId);
-      if (tab.pendingUrl && tab.pendingUrl !== job.url) throw Error('Адрес отчёта изменился.');
-      if (tab.url === job.url) break;
-      if (tab.pendingUrl !== job.url || Date.now() >= deadline) throw Error('Отчёт ещё не загрузил адрес.');
+      if (tab.pendingUrl && !sameUrl(tab.pendingUrl, job.url)) throw Error('Адрес отчёта изменился.');
+      if (sameUrl(tab.url, job.url)) break;
+      if (!sameUrl(tab.pendingUrl, job.url) || Date.now() >= deadline) throw Error('Отчёт ещё не загрузил адрес.');
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (active !== job || job.finishing) return;
@@ -151,8 +157,8 @@
     if (!job.modes.length) return finish(job.timedOut ? 'Не все отчёты успели загрузиться. Доступные показатели сохранены.' : '');
     job.mode = job.modes.shift();
     job.nonce = crypto.randomUUID();
-    const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6)) :
-      job.mode === 'now' ? weekUrl(job.context.channelId) : job.context[job.mode + 'Url'];
+    const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6), job.context.authuser) :
+      job.mode === 'now' ? weekUrl(job.context.channelId, job.context.authuser) : job.context[job.mode + 'Url'];
     job.url = url;
     await chrome.storage.session.set({ mbStudioSummaryCollector: {
       tabId: job.tabId, channelId: job.context.channelId, started: Date.now(), url } });
@@ -189,7 +195,7 @@
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, cleanEarly, cleanNow, dayUrl, weekUrl, validUrl, validate };
+    module.exports = { cleanMetrics, cleanEarly, cleanNow, dayUrl, weekUrl, sameUrl, validUrl, validate };
     return;
   }
   const ready = (async () => {

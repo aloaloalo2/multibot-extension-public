@@ -115,13 +115,22 @@
     }
     return null;
   }
+  // Which signed-in Google account this Studio page belongs to (ytcfg SESSION_INDEX in the page's own scripts).
+  function sessionIndex(doc) {
+    for (const script of doc.querySelectorAll?.('script') || []) {
+      const m = (script.textContent || '').match(/"SESSION_INDEX":"?(\d+)/);
+      if (m) return Number(m[1]);
+    }
+    return undefined;
+  }
   function context(doc, rawUrl) {
     const u = new URL(rawUrl), match = u.pathname.match(/^\/channel\/(UC[\w-]{22})\/analytics\/(hub_[a-z_]+)\/?$/);
     if (!match) return null;
     const channelId = match[1], range = dateRange(doc), days = Number((range.match(/^(\d+)/) || [])[1]);
     const home = doc.querySelector('#home-button')?.getAttribute('href') || '';
     if (!range || !PERIODS[days] || !home.includes('/channel/' + channelId) || !titleRow(doc)) return null;
-    const base = `${u.origin}/channel/${channelId}/analytics/`;
+    const base = `${u.origin}/channel/${channelId}/analytics/`, authuser = sessionIndex(doc);
+    const withAccount = (href, n) => { if (n === undefined) return href; const x = new URL(href); x.searchParams.set('authuser', String(n)); return x.href; };
     const explore = new URL(base + 'hub_content/explore');
     for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', PERIODS[days]], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) explore.searchParams.set(k, v);
@@ -130,7 +139,7 @@
     explore.searchParams.set('o_column', 'EXTERNAL_VIEWS');
     explore.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
     return { channelId, range, period: PERIODS[days], key: `mbStudioSummary:${channelId}:${hash('insights|' + PERIODS[days])}`,
-      contentUrl: base + 'hub_content', exploreUrl: explore.href };
+      contentUrl: withAccount(base + 'hub_content', authuser), exploreUrl: withAccount(explore.href, authuser), authuser };
   }
   function render(doc, ctx, record, onRefresh, effRecord) {
     const row = titleRow(doc);

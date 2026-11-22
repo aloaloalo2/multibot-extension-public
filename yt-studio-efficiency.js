@@ -80,13 +80,21 @@
     if (result.partial) lines.push('Прошло меньше 48 часов: оценка предварительная.');
     return lines.join('\n');
   }
+  // Which signed-in Google account this Studio page belongs to (ytcfg SESSION_INDEX in the page's own scripts).
+  function sessionIndex(doc) {
+    for (const script of doc.querySelectorAll?.('script') || []) {
+      const m = (script.textContent || '').match(/"SESSION_INDEX":"?(\d+)/);
+      if (m) return Number(m[1]);
+    }
+    return undefined;
+  }
   function context(rawUrl, doc) {
     const m = new URL(rawUrl).pathname.match(/^\/channel\/(UC[\w-]{22})\/videos(?:\/|$)/);
     if (!m) return null;
     const home = doc.querySelector('#home-button')?.getAttribute('href') || '';
     if (!home.includes('/channel/' + m[1])) return null;
     return { channelId: m[1], key: 'mbEfficiency:' + m[1], range: 'early', period: 'early',
-      earlyUrl: `https://studio.youtube.com/channel/${m[1]}/analytics/hub_overview`, ids: [] };
+      earlyUrl: `https://studio.youtube.com/channel/${m[1]}/analytics/hub_overview`, ids: [], authuser: sessionIndex(doc) };
   }
   // Videos on the page without their first two days yet (new ones are read again until both days are in).
   function missing(ids, earlyById) {
@@ -137,7 +145,7 @@
     return result.parts.map(p => `${p.label} (7 дн): ${p.key === 'avd' ? clock(p.value) : one(p.value) + '%'} → ${Math.round(p.points)}`).join('\n') +
       `\nПоказов за 7 дней: ${new Intl.NumberFormat('ru-RU').format(result.impr)}`;
   }
-  const api = { dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, NOW, MAX_IDS };
+  const api = { sessionIndex, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, NOW, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
