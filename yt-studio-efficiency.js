@@ -92,7 +92,52 @@
   function missing(ids, earlyById) {
     return [...new Set(ids)].filter(id => /^[\w-]{11}$/.test(id) && !(earlyById?.[id]?.days >= EARLY_DAYS)).slice(0, MAX_IDS);
   }
-  const api = { dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, MEASURES, MAX_IDS };
+  // «Сейчас»: YouTube keeps re-deciding every day. Inside a video's life (1600 days of 69 videos, 22 November 2026)
+  // the next two days' impressions grew after days with a higher percentage viewed and longer views (+0.20 each),
+  // CTR mattered less (+0.1), subscribers and shares did not. One report of the last 7 days ranks the channel's videos.
+  const NOW = [['% просмотра', 'avp', 0.4], ['Длина просмотра', 'avd', 0.4], ['CTR', 'ctr', 0.2]];
+  const MIN_NOW_IMPRESSIONS = 200;
+  function weekUrl(channelId) {
+    const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
+    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
+      ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
+    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME']) u.searchParams.append('t_metrics', m);
+    u.searchParams.set('dimension', 'VIDEO');
+    u.searchParams.set('o_column', 'VIDEO_THUMBNAIL_IMPRESSIONS');
+    u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
+    return u.href;
+  }
+  function readWeek(doc) {
+    const root = doc.querySelector('#debug-explore-table'), result = {};
+    if (!root) return result;
+    for (const row of root.querySelectorAll('yta-explore-table-row')) {
+      const id = (row.querySelector('img')?.getAttribute('src') || '').match(/\/vi(?:_webp)?\/([\w-]{11})\//)?.[1];
+      const c = [...row.querySelectorAll('.debug-metric-value')].map(text);
+      if (!id || c.length !== 5) continue;
+      result[id] = { views: number(c[0]) || 0, impr: number(c[1]) || 0, ctr: number(c[2]), avp: number(c[3]), avd: seconds(c[4]) };
+    }
+    return result;
+  }
+  function nowScores(byId) {
+    const known = Object.entries(byId || {}).filter(([, v]) => v.impr >= MIN_NOW_IMPRESSIONS && v.views >= MIN_EARLY_VIEWS && NOW.every(([, k]) => Number.isFinite(v[k])));
+    const rank = (key, value) => {
+      if (known.length < 2) return 50;
+      const all = known.map(([, v]) => v[key]), below = all.filter(x => x < value).length, equal = all.filter(x => x === value).length;
+      return (below + (equal - 1) / 2) / (all.length - 1) * 100;
+    };
+    const result = {};
+    for (const [id, v] of known) {
+      const parts = NOW.map(([label, key, weight]) => ({ label, key, weight, value: v[key], points: rank(key, v[key]) }));
+      result[id] = { value: Math.round(parts.reduce((a, p) => a + p.points * p.weight, 0)), parts, impr: v.impr };
+    }
+    return result;
+  }
+  const clock = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  function explainNow(result) {
+    return result.parts.map(p => `${p.label} (7 дн): ${p.key === 'avd' ? clock(p.value) : one(p.value) + '%'} → ${Math.round(p.points)}`).join('\n') +
+      `\nПоказов за 7 дней: ${new Intl.NumberFormat('ru-RU').format(result.impr)}`;
+  }
+  const api = { dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, NOW, MAX_IDS };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   globalThis.__mbEfficiency = api;   // the collector tab and the Insights table use the same scale
@@ -103,8 +148,10 @@
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
   style.textContent = `[${ROOT}]{flex:0 0 150px!important;width:150px!important;min-width:150px!important;max-width:150px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
-    [${ROOT}=cell]{align-items:flex-start!important;padding-top:12px!important}
-    [${ROOT}=cell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
+    [${ROOT}=cell],[${ROOT}=nowcell]{align-items:flex-start!important;padding-top:12px!important}
+    [${ROOT}=nowhead],[${ROOT}=nowcell]{flex-basis:110px!important;width:110px!important;min-width:110px!important;max-width:110px!important}
+    [${ROOT}=nowhead]{align-items:center!important}
+    [${ROOT}=cell] b,[${ROOT}=nowcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
     [${ROOT}=cell] b[data-partial]{opacity:.6}
     [${ROOT}=head]{align-items:center!important;gap:4px;white-space:nowrap}
     [${ROOT}=head] button{border:0;background:transparent;color:var(--yt-spec-text-secondary,#aaa);cursor:pointer;font-size:14px;line-height:14px;padding:2px}
@@ -128,15 +175,20 @@
       head.append(label, button);
     }
     if (head.previousElementSibling !== last) last.after(head);
+    let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
+    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'Сейчас'; }
+    if (nowHead.previousElementSibling !== head) head.after(nowHead);
+    nowHead.title = 'Продвигает ли YouTube ролик сейчас: % просмотра, длина просмотра и CTR за последние 7 дней по сравнению с другими роликами канала. ' +
+      `Ролики меньше чем с ${MIN_NOW_IMPRESSIONS} показами за неделю не оцениваются.` + (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '');
     const button = head.querySelector('button'), left = missing(pageIds(), record?.early).length;
     button.disabled = !!record?.loading;
     head.title = 'Насколько первые 48 часов ролика просят YouTube его продвигать: секунды просмотра на показ и подписки на 1000 просмотров, ' +
       'по сравнению с другими роликами этого канала. Просмотры не учитываются.' + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем первые 48 часов роликов…' : left ? `Прочитать первые 48 часов: ${left} ролик(ов) на странице` : 'Все ролики страницы уже прочитаны';
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : `Обновить «Сейчас» за 7 дней${left ? ` и прочитать первые 48 часов: ${left} ролик(ов)` : ''}`;
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const all = scores(record?.early);
+    const all = scores(record?.early), now = nowScores(record?.now);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
@@ -151,6 +203,15 @@
       b.style.background = bg; b.style.color = fg;
       b.toggleAttribute('data-partial', !!result?.partial);
       cell.title = result ? explain(result) : !e ? 'Нажмите ↻ в заголовке «Эффективность».' : `Мало данных: за первые 48 часов меньше ${MIN_EARLY_VIEWS} просмотров.`;
+      let nowCell = cell.parentElement.querySelector(`[${ROOT}=nowcell]`);
+      if (!nowCell) { nowCell = document.createElement('div'); nowCell.setAttribute(ROOT, 'nowcell'); nowCell.className = 'cell-body'; nowCell.append(document.createElement('b')); }
+      if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
+      const n = now[id], nb = nowCell.firstChild, nowLabel = n ? String(n.value) : '—';
+      if (nb.textContent !== nowLabel) nb.textContent = nowLabel;
+      const [nbg, nfg] = n ? color(n.value) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
+      nb.style.background = nbg; nb.style.color = nfg;
+      nowCell.title = n ? explainNow(n) : !record?.now ? 'Нажмите ↻ в заголовке «Эффективность».' :
+        `За последние 7 дней меньше ${MIN_NOW_IMPRESSIONS} показов: YouTube сейчас почти не показывает ролик.`;
     }
   }
   function draw() { if (!document.querySelector('ytcp-video-row')) return; header(); rows(); }
@@ -168,7 +229,6 @@
   async function refresh() {
     if (!ctx || record?.loading) return;
     const ids = missing(pageIds(), record?.early);
-    if (!ids.length) { draw(); return; }
     record = { ...record, loading: true, error: '' }; draw();
     try {
       const reply = await send({ type: 'mbEfficiencyRefresh', context: { ...ctx, ids } });

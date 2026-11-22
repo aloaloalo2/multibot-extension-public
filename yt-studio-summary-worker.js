@@ -36,6 +36,28 @@
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_ASC');
     return u.href;
   }
+  function weekUrl(channelId) {
+    const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
+    for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'week'], ['explore_type', 'TABLE_AND_CHART'],
+      ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
+    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME']) u.searchParams.append('t_metrics', m);
+    u.searchParams.set('dimension', 'VIDEO');
+    u.searchParams.set('o_column', 'VIDEO_THUMBNAIL_IMPRESSIONS');
+    u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
+    return u.href;
+  }
+  function cleanNow(input) {
+    const result = {};
+    for (const [id, v] of Object.entries(input || {}).slice(0, 2000)) {
+      if (!/^[\w-]{11}$/.test(id) || !v || !Number.isFinite(v.impr) || !Number.isFinite(v.views)) continue;
+      const row = { views: v.views, impr: v.impr };
+      if (Number.isFinite(v.ctr) && v.ctr >= 0 && v.ctr <= 100) row.ctr = v.ctr;
+      if (Number.isFinite(v.avp) && v.avp >= 0 && v.avp <= 1000) row.avp = v.avp;
+      if (Number.isFinite(v.avd) && v.avd >= 0 && v.avd < 86400) row.avd = v.avd;
+      result[id] = row;
+    }
+    return result;
+  }
   function cleanEarly(input, ids) {
     const result = {};
     for (const id of ids || []) {
@@ -129,7 +151,8 @@
     if (!job.modes.length) return finish(job.timedOut ? 'Не все отчёты успели загрузиться. Доступные показатели сохранены.' : '');
     job.mode = job.modes.shift();
     job.nonce = crypto.randomUUID();
-    const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6)) : job.context[job.mode + 'Url'];
+    const url = job.mode.startsWith('early:') ? dayUrl(job.context.channelId, job.mode.slice(6)) :
+      job.mode === 'now' ? weekUrl(job.context.channelId) : job.context[job.mode + 'Url'];
     job.url = url;
     await chrome.storage.session.set({ mbStudioSummaryCollector: {
       tabId: job.tabId, channelId: job.context.channelId, started: Date.now(), url } });
@@ -166,7 +189,7 @@
     return { ok: true, record: (await chrome.storage.local.get(context.key))[context.key] };
   }
   if (typeof module === 'object' && module.exports) {
-    module.exports = { cleanMetrics, cleanEarly, dayUrl, validUrl, validate };
+    module.exports = { cleanMetrics, cleanEarly, cleanNow, dayUrl, weekUrl, validUrl, validate };
     return;
   }
   const ready = (async () => {
@@ -186,7 +209,7 @@
       // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
-      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, message.context?.ids?.map?.(id => 'early:' + id));
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['now', ...(message.context?.ids?.map?.(id => 'early:' + id) || [])]);
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {
@@ -195,6 +218,11 @@
         return { ok: true, collector: { mode: job.mode, nonce: job.nonce, context: job.context } };
       }
       if (message.nonce !== job.nonce || message.range !== job.context.range) return { ok: false };
+      if (job.mode === 'now') {
+        await merge(job.context, {}, { now: cleanNow(message.now), nowAt: Date.now() });
+        await next();
+        return { ok: true };
+      }
       if (job.mode.startsWith('early:')) {
         const early = cleanEarly(message.early, [job.mode.slice(6)]);
         if (Object.keys(early).length) await merge(job.context, {}, { early, earlyAt: Date.now() });

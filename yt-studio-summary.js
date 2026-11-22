@@ -284,6 +284,16 @@
       if (finished) return;
       const home = document.querySelector('#home-button')?.getAttribute('href') || '';
       if (!home.includes('/channel/' + job.context.channelId)) return;
+      if (job.mode === 'now') {
+        // «Сейчас»: the channel's videos over the last 7 days.
+        if (new URL(location.href).searchParams.get('time_period') !== 'week') return;
+        const now = globalThis.__mbEfficiency?.readWeek(document) || {}, signature = JSON.stringify(now);
+        repeats = signature === stable ? repeats + 1 : 0; stable = signature;
+        if ((!Object.keys(now).length && Date.now() - started < 20000) || (Object.keys(now).length && repeats < 2)) return;
+        finished = true; clearInterval(collectorTimer);
+        try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, now }); } catch {}
+        return;
+      }
       if (job.mode.startsWith('early:')) {
         // «Эффективность»: this tab shows one video's day-by-day report; its first two days are kept.
         const scale = globalThis.__mbEfficiency, rows = scale?.readDays(document), signature = JSON.stringify(rows);
