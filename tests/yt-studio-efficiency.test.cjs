@@ -8,24 +8,10 @@ const node=textContent=>({textContent});
 function doc(rows){
   return {querySelector:()=>({querySelectorAll:()=>rows.map(([d,...c])=>({querySelector:()=>node(d),querySelectorAll:()=>c.map(node)}))})};
 }
-test('the first two days of a video report become its early window, with the publication date',()=>{
-  const rows=eff.readDays(doc([['Итого','472','4 140','1,4 %','3:39','0'],['2 нояб. 2026 г.','10','72','1,4 %','2:30','0'],['3 нояб. 2026 г.','15','928','0,8 %','3:00','1'],['4 нояб. 2026 г.','156','1 173','1,6 %','4:00','5']]));
-  assert.equal(rows.length,3);
-  const e=eff.early(rows);
-  assert.equal(e.date,'2026-11-02');assert.equal(e.days,2);assert.equal(e.views,25);assert.equal(e.impr,1000);assert.equal(e.subs,1);
-  assert.ok(Math.abs(e.ctr-(1.4*72+0.8*928)/1000)<1e-9);assert.equal(e.avd,(150*10+180*15)/25);
-  assert.equal(eff.early(rows.slice(0,1)).days,1);assert.equal(eff.early([]),null);
-  assert.equal(eff.parseDate('Nov 14, 2026'),'2026-11-14');assert.equal(eff.parseDate('5 лист. 2026 р.'),'2026-11-05');
-});
 test('views do not count: the same early quality scores the same whatever the reach',()=>{
   const v=(views)=>({days:2,views,impr:views*20,ctr:5,avd:300,subs:views/100});
   const s=eff.scores({a:v(100),b:v(100000)});
   assert.equal(s.a.value,s.b.value);
-});
-test('only videos without both early days are read again, at most 60',()=>{
-  const ids=Array.from({length:70},(_,i)=>'v'+String(i).padStart(10,'0'));
-  assert.equal(eff.missing(ids,{}).length,60);
-  assert.deepEqual(eff.missing(['aaaaaaaaaaa','bbbbbbbbbbb','bad'],{aaaaaaaaaaa:{days:2},bbbbbbbbbbb:{days:1}}),['bbbbbbbbbbb']);
 });
 test('the efficiency request is valid only from its own channel Content page and keeps only listed videos',()=>{
   const page=`https://studio.youtube.com/channel/${channel}/videos/upload`;
@@ -104,14 +90,6 @@ test('the score ranks CTR (70%), subscribers per 1000 views (20%) and view lengt
   const row=(id,c)=>({querySelector:x=>x==='img'?{getAttribute:()=>`https://i.ytimg.com/vi/${id}/mqdefault.jpg`}:null,querySelectorAll:()=>c.map(t=>({textContent:t}))});
   assert.deepEqual(eff.readWeek({querySelector:()=>({querySelectorAll:()=>[row('WA8pO04HUwA',['900','20 000','4,5 %','4:10','7','30,5 %','12'])]})}),{WA8pO04HUwA:{views:900,impr:20000,ctr:4.5,avd:250,subs:7,avp:30.5,shares:12}});
 });
-test('«CTR 48ч» covers the last 2 California days before yesterday, as Studio counts its days',()=>{
-  const r=eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(Number);
-  assert.deepEqual(r.map(x=>new Date(x).toISOString()),['2026-11-19T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
-  assert.deepEqual(eff.recentRange(Date.parse('2026-07-10T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-07-07T07:00:00.000Z','2026-07-09T07:00:00.000Z']);
-  const s=eff.nowScores({a:{views:25,impr:900,ctr:5,avd:200,subs:1},b:{views:25,impr:900,ctr:3,avd:100,subs:0},q:{views:10,impr:300,ctr:9,avd:900,subs:5}},eff.MIN_RECENT_VIEWS);
-  assert.equal(s.a.value,100);assert.equal(s.q,undefined);
-  assert.match(eff.explainNow(s.a,'4 дня'),/^CTR \(4 дня\): 5% → 100, вес 70%\n/);
-});
 test('each channel gets its own weights from how its measures follow views (Космос: subscribers and shares, not CTR)',()=>{
   // Космос PRO lifetime report, 22 November 2026: views, impressions, CTR, view length, subscribers, % viewed, shares.
   const rows=[[150052,1299495,3.7,669,400,38.2,169],[55641,311611,5.7,443,179,43.7,80],[11069,82459,4.1,717,34,47.3,8],[8779,88009,2.6,584,35,48.1,38],
@@ -133,4 +111,21 @@ test('the CTR columns show each video CTR with its place among the channel video
   const p=eff.ctrPlaces({a:{views:500,impr:9000,ctr:6},b:{views:500,impr:9000,ctr:4},c:{views:500,impr:9000,ctr:2},q:{views:50,impr:500,ctr:9}});
   assert.equal(p.a.place,100);assert.equal(p.b.place,50);assert.equal(p.c.place,0);assert.equal(p.q,undefined);assert.equal(p.a.median,4);
   assert.equal(eff.explainCtr(p.a),'CTR за всё время: 6%\nМедиана канала: 4%\nВыше, чем у 100% роликов канала\nПоказов: 9 000');
+});
+test('the first day of a video report is its «первые 24ч», with the publication date',()=>{
+  const rows=eff.readDays(doc([['Итого','472','4 140','1,4 %','3:39','0'],['2 нояб. 2026 г.','10','72','1,4 %','2:30','0'],['3 нояб. 2026 г.','15','928','0,8 %','3:00','1']]));
+  const e=eff.early(rows);
+  assert.equal(e.date,'2026-11-02');assert.equal(e.days,1);assert.equal(e.views,10);assert.equal(e.impr,72);assert.ok(Math.abs(e.ctr-1.4)<1e-9);
+  assert.equal(eff.parseDate('Nov 14, 2026'),'2026-11-14');assert.equal(eff.parseDate('5 лист. 2026 р.'),'2026-11-05');
+  assert.equal(eff.early([]),null);
+});
+test('only videos without their first day read are read again, at most 60 (old two-day entries too)',()=>{
+  const ids=Array.from({length:70},(_,i)=>'v'+String(i).padStart(10,'0'));
+  assert.equal(eff.missing(ids,{}).length,60);
+  assert.deepEqual(eff.missing(['aaaaaaaaaaa','bbbbbbbbbbb','bad'],{aaaaaaaaaaa:{days:1},bbbbbbbbbbb:{days:2}}),['bbbbbbbbbbb']);
+});
+test('«сейчас 24ч» covers the last California day before yesterday, as Studio counts its days',()=>{
+  assert.deepEqual(eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-11-20T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
+  const {recentUrl}=require('../yt-studio-summary-worker.js');
+  assert.equal(new URL(recentUrl('UC8oU4MP1dV8FTp33W7Usiyw',0,Date.parse('2026-11-22T10:00:00Z'))).searchParams.get('time_period'),eff.recentRange(Date.parse('2026-11-22T10:00:00Z')));
 });

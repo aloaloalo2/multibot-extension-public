@@ -51,10 +51,10 @@
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
     return account(u, authuser);
   }
-  // The last 2 days with data (yt-studio-efficiency.js recentRange): Studio's daily data ends two days back.
+  // The last day with data (yt-studio-efficiency.js recentRange): Studio's daily data ends two days back.
   function recentUrl(channelId, authuser, now = Date.now()) {
     const u = new URL(weekUrl(channelId, authuser));
-    u.searchParams.set('time_period', `${pacificMidnight(now, 3)},${pacificMidnight(now, 1)}`);
+    u.searchParams.set('time_period', `${pacificMidnight(now, 2)},${pacificMidnight(now, 1)}`);
     return u.href;
   }
   function pacificMidnight(now, daysBack) {
@@ -233,7 +233,7 @@
       // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
-      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['now', 'recent']);
+      if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['now', 'recent', ...(message.context?.ids || []).map(id => 'early:' + id)]);
       const job = active;
       if (!job || job.finishing || sender.tab?.id !== job.tabId || !validUrl(sender.tab.url, job.context.channelId)) return { ok: true };
       if (message.type === 'mbStudioSummaryProbe') {

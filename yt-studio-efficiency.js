@@ -4,7 +4,7 @@
 // Views and impressions never enter the score (author, 22 November 2026).
 (() => {
   const ROOT = 'data-multibot-efficiency';
-  const EARLY_DAYS = 2, MIN_EARLY_VIEWS = 20, MAX_IDS = 60;
+  const EARLY_DAYS = 1, MIN_EARLY_VIEWS = 10, MAX_IDS = 60;   // «первые 24ч»: the first day of the video's report
   // Views and impressions are never part of the score. What follows views differs by channel (22 November 2026: CTR on
   // Чичваркин +47, on Космос +7, where subscribers per 1000 views gave +79), so each channel gets its own weights:
   // a measure weighs as much as its rank correlation with the channel's views (negative ones weigh nothing). Checked by
@@ -106,7 +106,7 @@
   }
   // Videos on the page without their first two days yet (new ones are read again until both days are in).
   function missing(ids, earlyById) {
-    return [...new Set(ids)].filter(id => /^[\w-]{11}$/.test(id) && !(earlyById?.[id]?.days >= EARLY_DAYS)).slice(0, MAX_IDS);
+    return [...new Set(ids)].filter(id => /^[\w-]{11}$/.test(id) && earlyById?.[id]?.days !== EARLY_DAYS).slice(0, MAX_IDS);
   }
   // The whole life of a video: the same measures (seconds watched per impression 70%, subscribers per 1000 views 30%,
   // ranked inside the channel) over all its days, from one lifetime report of the channel (author, 22 November 2026:
@@ -190,7 +190,7 @@
   // «Сейчас»: the same measures over the last 4 days with data. Studio's daily data ends two days back (on 22 November
   // its last day was 20 November), so the range is the 4 California days before yesterday; the report takes it as
   // `time_period=<start ms>,<end ms>`.
-  const RECENT_DAYS = 2, MIN_RECENT_VIEWS = 20;   // «CTR 48ч»: the last two days with data (author, 22 November 2026)
+  const RECENT_DAYS = 1, MIN_RECENT_VIEWS = 10;   // «сейчас 24ч»: the last day with data (author, 22 November 2026)
   function pacificMidnight(now, daysBack) {
     // Studio's days start at midnight in California (08:00 UTC in winter, 07:00 in summer).
     const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(now)).split('-').map(Number);
@@ -235,12 +235,10 @@
   const style = document.createElement('style');
   // Studio's own .cell-header rules are more specific than ours: the width needs !important on both header and cells,
   // or the header column is narrower than the rows and its label runs into «Комментарии».
-  style.textContent = `[${ROOT}]{flex:0 0 120px!important;width:120px!important;min-width:120px!important;max-width:120px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
-    [${ROOT}=cell],[${ROOT}=nowcell],[${ROOT}=reachcell]{align-items:flex-start!important;padding-top:12px!important}
-    [${ROOT}=nowhead],[${ROOT}=nowcell],[${ROOT}=reachhead],[${ROOT}=reachcell]{flex-basis:110px!important;width:110px!important;min-width:110px!important;max-width:110px!important}
-    [${ROOT}=nowhead],[${ROOT}=reachhead]{align-items:center!important}
-    [${ROOT}=cell] b,[${ROOT}=nowcell] b,[${ROOT}=reachcell] b{display:inline-block;min-width:34px;padding:2px 6px;border-radius:10px;font:500 14px/18px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
-    [${ROOT}=cell] b[data-partial]{opacity:.6}
+  style.textContent = `[${ROOT}]{flex:0 0 170px!important;width:170px!important;min-width:170px!important;max-width:170px!important;box-sizing:border-box!important;padding:0 24px 0 12px!important;display:flex!important;justify-content:flex-end!important}
+    [${ROOT}=cell]{flex-direction:column!important;align-items:flex-end!important;justify-content:flex-start!important;gap:3px;padding-top:8px!important}
+    [${ROOT}=cell] div{display:flex;align-items:center;gap:6px;font:400 11px/14px Roboto,Arial,sans-serif;color:var(--yt-spec-text-secondary,#aaa);white-space:nowrap}
+    [${ROOT}=cell] b{display:inline-block;min-width:40px;padding:1px 6px;border-radius:9px;font:500 12px/16px Roboto,Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}
     [${ROOT}=head]{align-items:center!important;gap:4px;white-space:nowrap}
     [${ROOT}=head] button{border:0;background:transparent;color:var(--yt-spec-text-secondary,#aaa);cursor:pointer;font-size:14px;line-height:14px;padding:2px}
     [${ROOT}=head] button:disabled{cursor:wait;animation:mb-eff-spin 1s linear infinite}
@@ -257,18 +255,13 @@
     let head = last.parentElement.querySelector(`[${ROOT}=head]`);
     if (!head) {
       head = document.createElement('div'); head.setAttribute(ROOT, 'head'); head.className = last.className.replace(/tablecell-\S+/g, '').trim();
-      const label = document.createElement('span'); label.textContent = 'CTR (все)';
+      const label = document.createElement('span'); label.textContent = 'CTR';
       const button = document.createElement('button'); button.type = 'button'; button.textContent = '↻';
       button.onclick = () => void refresh();
       head.append(label, button);
     }
     if (head.previousElementSibling !== last) last.after(head);
-    head.parentElement.querySelector(`[${ROOT}=reachhead]`)?.remove();
-    let nowHead = head.parentElement.querySelector(`[${ROOT}=nowhead]`);
-    if (!nowHead) { nowHead = document.createElement('div'); nowHead.setAttribute(ROOT, 'nowhead'); nowHead.className = head.className; nowHead.textContent = 'CTR 48ч'; }
-    if (nowHead.previousElementSibling !== head) head.after(nowHead);
-    nowHead.title = 'CTR за последние 48 часов с данными: Studio отдаёт дни с задержкой примерно в два дня. Цвет — место среди роликов канала за те же дни.' +
-      (record?.recentAt ? `\nДанные: ${new Date(record.recentAt).toLocaleString('ru-RU')}` : '');
+    head.parentElement.querySelectorAll(`[${ROOT}=reachhead],[${ROOT}=nowhead]`).forEach(e => e.remove());
     const button = head.querySelector('button');
     button.disabled = !!record?.loading;
     // A failed refresh shows ⚠ in place of ↻: its reason is in the tooltip, a click tries again.
@@ -276,36 +269,37 @@
     if (button.textContent !== mark) button.textContent = mark;
     button.style.color = mark === '⚠' ? '#f9ab00' : '';
     const places = ctrPlaces(record?.now), first = Object.values(places)[0];
-    head.title = 'CTR ролика за всё время. Из всех показателей Studio только CTR шёл вместе с просмотрами на всех больших каналах; ' +
+    head.title = 'CTR ролика: за всё время, за первые 24 часа после публикации и за последние 24 часа с данными (Studio отдаёт дни с задержкой примерно в два дня). ' +
+      'Из всех показателей Studio только CTR шёл вместе с просмотрами на всех больших каналах; ' +
       'ролик с CTR ниже медианы канала хитом не становился. Зелёный — выше, чем у 60% роликов канала, красный — ниже, чем у 60%.' +
       (first ? `\nМедиана канала: ${one(first.median)}%` : '') +
       (record?.nowAt ? `\nДанные: ${new Date(record.nowAt).toLocaleString('ru-RU')}` : '') + (record?.error ? '\n' + record.error : '');
-    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : 'Обновить CTR за всё время и за последние дни';
+    button.title = record?.loading ? 'Читаем отчёты роликов…' : record?.error ? record.error : `Обновить CTR${missing(pageIds(), record?.early).length ? ` и прочитать первые 24 часа: ${missing(pageIds(), record?.early).length} ролик(ов)` : ''}`;
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const all = ctrPlaces(record?.now), recent = ctrPlaces(record?.recent, MIN_RECENT_VIEWS);
-    const paint = (cell, r) => {
-      const b = cell.firstChild, label = r ? one(r.ctr) + '%' : '—';
-      if (b.textContent !== label) b.textContent = label;
-      const [bg, fg] = r ? (r.place >= 60 ? color(100) : r.place >= 40 ? color(50) : color(0)) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
-      b.style.background = bg; b.style.color = fg;
-    };
-    const make = (kind) => { const c = document.createElement('div'); c.setAttribute(ROOT, kind); c.className = 'cell-body'; c.append(document.createElement('b')); return c; };
+    const lines = [['все', ctrPlaces(record?.now), 'за всё время'], ['первые 24ч', ctrPlaces(Object.fromEntries(Object.entries(record?.early || {}).filter(([, e]) => e.days === EARLY_DAYS)), MIN_EARLY_VIEWS), 'за первые 24 часа'],
+      ['сейчас 24ч', ctrPlaces(record?.recent, MIN_RECENT_VIEWS), 'за последние 24 часа']];
     const idOf = row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
       if (!last) continue;
-      const cell = last.parentElement.querySelector(`[${ROOT}=cell]`) || make('cell');
+      row.querySelectorAll(`[${ROOT}=nowcell],[${ROOT}=reachcell]`).forEach(e => e.remove());
+      let cell = last.parentElement.querySelector(`[${ROOT}=cell]`);
+      if (!cell) {
+        cell = document.createElement('div'); cell.setAttribute(ROOT, 'cell'); cell.className = 'cell-body';
+        for (const [label] of lines) { const line = document.createElement('div'), name = document.createElement('span'); name.textContent = label; line.append(name, document.createElement('b')); cell.append(line); }
+      }
       if (cell.previousElementSibling !== last) last.after(cell);
-      cell.parentElement.querySelector(`[${ROOT}=reachcell]`)?.remove();
-      const nowCell = cell.parentElement.querySelector(`[${ROOT}=nowcell]`) || make('nowcell');
-      if (nowCell.previousElementSibling !== cell) cell.after(nowCell);
-      const id = idOf(row);
-      paint(cell, all[id]); paint(nowCell, recent[id]);
-      cell.title = all[id] ? explainCtr(all[id]) : !record?.now ? 'Нажмите ↻ в заголовке «CTR (все)».' : `Мало данных: меньше ${MIN_NOW_VIEWS} просмотров за всё время.`;
-      nowCell.title = recent[id] ? explainCtr(recent[id], 'за 48 часов') : !record?.recent ? 'Нажмите ↻ в заголовке «CTR (все)».' :
-        `За последние 48 часов меньше ${MIN_RECENT_VIEWS} просмотров: YouTube сейчас почти не показывает ролик.`;
+      const id = idOf(row), tips = [];
+      lines.forEach(([label, places, period], i) => {
+        const r = places[id], b = cell.children[i].querySelector('b'), text = r ? one(r.ctr) + '%' : '—';
+        if (b.textContent !== text) b.textContent = text;
+        const [bg, fg] = r ? (r.place >= 60 ? color(100) : r.place >= 40 ? color(50) : color(0)) : ['transparent', 'var(--yt-spec-text-secondary,#aaa)'];
+        b.style.background = bg; b.style.color = fg;
+        tips.push(r ? explainCtr(r, period) : `CTR ${period}: нет данных`);
+      });
+      cell.title = record?.now || record?.early || record?.recent ? tips.join('\n\n') : 'Нажмите ↻ в заголовке «CTR».';
     }
   }
   function draw() { if (!document.querySelector('ytcp-video-row')) return; header(); rows(); }
@@ -324,7 +318,7 @@
     if (!ctx || record?.loading) return;
     record = { ...record, loading: true, error: '' }; draw();
     try {
-      const reply = await send({ type: 'mbEfficiencyRefresh', context: { ...ctx, ids: [] } });
+      const reply = await send({ type: 'mbEfficiencyRefresh', context: { ...ctx, ids: missing(pageIds(), record?.early) } });
       record = reply?.ok ? reply.record : { ...record, loading: false, error: reply?.error || 'Не удалось обновить. Нажмите ещё раз.' };
     } catch { record = { ...record, loading: false, error: 'Перезагрузите страницу после обновления расширения.' }; }
     draw();
