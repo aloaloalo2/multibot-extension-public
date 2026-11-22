@@ -1,5 +1,5 @@
 // «Эффективность» column on the Studio Content list: a 0–100 score per video from CTR, average percentage viewed,
-// average view duration, likes per view and shares per view of the video's lifetime report. Views do not count. Fixed YouTube benchmarks,
+// average view duration and shares per view of the video's lifetime report. Views do not count. Fixed YouTube benchmarks,
 // equal weights (author's choice, 21 November 2026). The report is read only when the author presses ↻.
 (() => {
   const ROOT = 'data-multibot-efficiency';
@@ -12,9 +12,7 @@
     // Relative to the channel: its longest average view gets 100, the others their share of it (author, 22 November
     // 2026: fixed minutes gave every long video 100). Without the channel's videos (the Insights table) it is left out.
     ['Длина одного просмотра', 'avd', (v, o) => o.maxAvd > 0 ? v / o.maxAvd * 100 : null],
-    // Lenient and saturating: 10% of views liking a video is 80 points (author, 22 November 2026).
-    ['Лайки / просмотры', 'likes', v => 100 * (1 - Math.exp(-v / 6.2))],
-    // Lenient like the likes: shares are rare, 1% of views sharing is 70 points (author, 22 November 2026).
+    // Likes are not scored (author, 22 November 2026). Lenient and saturating: shares are rare, 1% of views sharing is 70 points (author, 22 November 2026).
     ['Поделились / просмотры', 'shares', v => 100 * (1 - Math.exp(-v / 0.83))],
   ];
   const MIN_VIEWS = 100;
@@ -34,7 +32,7 @@
     const u = new URL(`https://studio.youtube.com/channel/${channelId}/analytics/hub_content/explore`);
     for (const [k, v] of [['entity_type', 'CHANNEL'], ['entity_id', channelId], ['time_period', 'lifetime'], ['explore_type', 'TABLE_AND_CHART'],
       ['metrics_computation_type', 'DELTA'], ['metric', 'EXTERNAL_VIEWS'], ['granularity', 'DAY']]) u.searchParams.set(k, v);
-    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME', 'RATINGS_LIKES', 'SHARINGS']) u.searchParams.append('t_metrics', m);
+    for (const m of ['EXTERNAL_VIEWS', 'VIDEO_THUMBNAIL_IMPRESSIONS_VTR', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME', 'SHARINGS']) u.searchParams.append('t_metrics', m);
     u.searchParams.set('dimension', 'VIDEO');
     u.searchParams.set('o_column', 'EXTERNAL_VIEWS');
     u.searchParams.set('o_direction', 'ANALYTICS_ORDER_DIRECTION_DESC');
@@ -86,7 +84,7 @@
     const button = head.querySelector('button');
     button.disabled = !!record?.loading;
     const at = record?.videosAt ? `Данные: ${new Date(record.videosAt).toLocaleString('ru-RU')}.` : 'Данных ещё нет.';
-    head.title = `Эффективность ролика 0–100 без учёта просмотров: CTR, средний % просмотра, длина одного просмотра, лайки и «Поделиться» на просмотр за всё время. ${at}${record?.error ? '\n' + record.error : ''}`;
+    head.title = `Эффективность ролика 0–100 без учёта просмотров: CTR, средний % просмотра, длина одного просмотра и «Поделиться» на просмотр за всё время. ${at}${record?.error ? '\n' + record.error : ''}`;
     button.title = record?.loading ? 'Загружаем отчёт канала…' : 'Обновить оценки из «Расширенного режима»';
     button.setAttribute('aria-label', button.title);
   }

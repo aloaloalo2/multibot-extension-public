@@ -2,7 +2,7 @@
 // No YouTube API credentials, direct API calls or changes to channel settings.
 (() => {
   const PREFIX = 'mbStudioSummary:', EFFICIENCY = 'mbEfficiency:';
-  const METRICS = ['ctr', 'duration', 'avd', 'retention', 'likes', 'shares'];
+  const METRICS = ['ctr', 'duration', 'avd', 'retention', 'shares'];
   const queue = [];
   const pending = new Set();
   let active = null;
@@ -29,7 +29,7 @@
     for (const [id, v] of Object.entries(input || {}).slice(0, 2000)) {
       if (!/^[\w-]{11}$/.test(id) || !v || !Number.isInteger(v.views) || v.views < 0) continue;
       const row = { views: v.views };
-      for (const k of ['ctr', 'avp', 'likes', 'shares'])
+      for (const k of ['ctr', 'avp', 'shares'])
         if (Number.isFinite(v[k]) && v[k] >= 0 && v[k] <= 10000) row[k] = v[k];
       if (Number.isInteger(v.avd) && v.avd >= 0 && v.avd < 86400) row.avd = v.avd;
       result[id] = row;
@@ -167,7 +167,7 @@
     if (!['mbStudioSummaryGet', 'mbStudioSummaryRefresh', 'mbEfficiencyGet', 'mbEfficiencyRefresh', 'mbStudioSummaryProbe', 'mbStudioSummaryResult'].includes(message?.type)) return;
     void ready.then(async () => {
       if (message.type === 'mbStudioSummaryGet') return request(message.context, message.metrics, sender);
-      // One click refreshes everything: «Расширенный режим» (percentage viewed, likes, shares), then «Контент» (CTR, 0:30).
+      // One click refreshes everything: «Расширенный режим» (percentage viewed, view length, shares), then «Контент» (CTR, 0:30).
       if (message.type === 'mbStudioSummaryRefresh') return request(message.context, {}, sender, ['explore', 'content']);
       if (message.type === 'mbEfficiencyGet') return request(message.context, {}, sender);
       if (message.type === 'mbEfficiencyRefresh') return request(message.context, {}, sender, ['videos']);
@@ -185,7 +185,7 @@
         await next();
         return { ok: true };
       }
-      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : ['duration', 'avd', 'likes', 'shares'];
+      const allowed = job.mode === 'content' ? ['ctr', 'retention'] : ['duration', 'avd', 'shares'];
       const metrics = Object.fromEntries(allowed.filter(k => message.metrics?.[k]).map(k => [k, message.metrics[k]]));
       await merge(job.context, metrics);
       await next();

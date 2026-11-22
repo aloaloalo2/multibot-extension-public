@@ -4,12 +4,13 @@
 (() => {
   const ROOT = 'data-multibot-channel-summary';
   // «score» is not read from Studio: it is the channel's «Эффективность», the same 0–100 scale as the Content list.
-  const NAMES = ['ctr', 'duration', 'retention', 'likes', 'shares', 'score'];
-  const LABELS = ['CTR', 'Просмотр', '0:30', 'Лайки/просм.', 'Поделились/просм.', 'Эффективность'];
-  const FULL_LABELS = ['CTR для значков видео', 'Средний процент просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение лайков к просмотрам', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам', 'Эффективность канала 0–100 без учёта просмотров'];
+  // Likes left the table and the scores (author, 22 November 2026); the average view length took their place.
+  const NAMES = ['ctr', 'duration', 'avd', 'retention', 'shares', 'score'];
+  const LABELS = ['CTR', 'Просмотр', 'Длина', '0:30', 'Поделились/просм.', 'Эффективность'];
+  const FULL_LABELS = ['CTR для значков видео', 'Средний процент просмотра', 'Средняя длина одного просмотра', 'Удержание на отметке 0:30', 'Среднее соотношение числа публикаций через «Поделиться» к просмотрам', 'Эффективность канала 0–100 без учёта просмотров'];
   // Period chips of the Insights pages and the matching «Расширенный режим» period.
   const PERIODS = { 7: 'week', 28: '4_weeks', 90: 'quarter' };
-  const EXPLORE_METRICS = ['EXTERNAL_VIEWS', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME', 'RATINGS_LIKES', 'SHARINGS'];
+  const EXPLORE_METRICS = ['EXTERNAL_VIEWS', 'AVERAGE_WATCH_PERCENTAGE', 'AVERAGE_WATCH_TIME', 'SHARINGS'];
   const text = e => (e?.textContent || '').replace(/[  ‎‏⁨⁩]/g, ' ').replace(/\s+/g, ' ').trim();
   const visible = e => e && !e.closest('[hidden], [aria-hidden="true"]') && e.getClientRects().length > 0;
   function percentage(value) {
@@ -51,7 +52,7 @@
     }
     return metrics;
   }
-  // «Расширенный режим», one row per video: views, average percentage viewed, likes, shares.
+  // «Расширенный режим», one row per video: views, average percentage viewed, view length, shares.
   function exploreMetrics(doc, rawUrl) {
     const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics');
     const vi = columns.indexOf('EXTERNAL_VIEWS');
@@ -76,15 +77,15 @@
       const result = average(rows.map(r => seconds(r.cells[n('AVERAGE_WATCH_TIME')])));
       if (result) metrics.avd = { ...result, source: `Средняя длина одного просмотра по ${result.count} роликам отчёта за выбранный период.` };
     }
-    for (const [name, column, label] of [['likes', 'RATINGS_LIKES', 'лайки'], ['shares', 'SHARINGS', 'число публикаций через «Поделиться»']]) {
+    for (const [name, column, label] of [['shares', 'SHARINGS', 'число публикаций через «Поделиться»']]) {
       if (n(column) < 0) continue;
-      const values = rows.map(r => { const v = count(r.cells[n(column)]); return v === null || (name === 'likes' && v > r.views) ? null : v / r.views * 100; });
+      const values = rows.map(r => { const v = count(r.cells[n(column)]); return v === null ? null : v / r.views * 100; });
       const result = average(values);
       if (result) metrics[name] = { ...result, source: `Среднее (${label} ÷ просмотры × 100%) по ${result.count} роликам отчёта за выбранный период. Ролики без просмотров исключены.` };
     }
     return metrics;
   }
-  // The same report per video for «Эффективность» on the Content list: {videoId: {views, ctr, avp, likes, shares}}.
+  // The same report per video for «Эффективность» on the Content list: {videoId: {views, ctr, avp, avd, shares}}.
   function exploreVideos(doc, rawUrl) {
     const u = new URL(rawUrl), columns = u.searchParams.getAll('t_metrics'), n = name => columns.indexOf(name);
     const root = doc.querySelector('#debug-explore-table');
@@ -100,7 +101,7 @@
       const time = n('AVERAGE_WATCH_TIME') < 0 ? null : seconds(cells[n('AVERAGE_WATCH_TIME')]);
       if (time !== null) video.avd = time;
       const per = name => { const v = n(name) < 0 ? null : count(cells[n(name)]); return v === null || !views ? null : v / views * 100; };
-      for (const [k, v] of [['ctr', pct('VIDEO_THUMBNAIL_IMPRESSIONS_VTR')], ['avp', pct('AVERAGE_WATCH_PERCENTAGE')], ['likes', per('RATINGS_LIKES')], ['shares', per('SHARINGS')]])
+      for (const [k, v] of [['ctr', pct('VIDEO_THUMBNAIL_IMPRESSIONS_VTR')], ['avp', pct('AVERAGE_WATCH_PERCENTAGE')], ['shares', per('SHARINGS')]])
         if (v !== null) video[k] = v;
       videos[id] = video;
     }
@@ -185,7 +186,8 @@
         button.append(span, icon); cell.replaceChildren(button);
       }
       const span = button.querySelector('[data-likes-value]');
-      const labelText = !ok ? '—' : name === 'score' ? String(efficiency.value) : (name === 'shares' ? two : one).format(metric.value) + '%';
+      const clock = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+      const labelText = !ok ? '—' : name === 'score' ? String(efficiency.value) : name === 'avd' ? clock(metric.value) : (name === 'shares' ? two : one).format(metric.value) + '%';
       if (span.textContent !== labelText) span.textContent = labelText;
       button.disabled = !!record?.loading;
       button.setAttribute('aria-label', record?.loading ? `Обновление: ${FULL_LABELS[NAMES.indexOf(name)]}` : 'Обновить показатели канала');
@@ -198,7 +200,7 @@
   function channelScore(record) {
     const scale = globalThis.__mbEfficiency || (typeof require === 'function' ? require('./yt-studio-efficiency.js') : null);
     const m = record?.metrics || {}, v = name => Number.isFinite(m[name]?.value) ? m[name].value : undefined;
-    const result = scale?.score({ views: Infinity, ctr: v('ctr'), avp: v('duration'), avd: v('avd'), likes: v('likes'), shares: v('shares') });
+    const result = scale?.score({ views: Infinity, ctr: v('ctr'), avp: v('duration'), avd: v('avd'), shares: v('shares') });
     return result ? { value: result.value, explain: scale.explain(result) } : null;
   }
   if (typeof module === 'object' && module.exports) {
@@ -310,7 +312,7 @@
       }
       const metrics = readMetrics(document, location.href, job.mode), signature = JSON.stringify(metrics);
       repeats = signature === stable ? repeats + 1 : 0; stable = signature;
-      const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!(metrics.duration && metrics.likes && metrics.shares);
+      const complete = job.mode === 'content' ? !!(metrics.ctr && metrics.retention) : !!(metrics.duration && metrics.avd && metrics.shares);
       if ((!complete && Date.now() - started < 20000) || repeats < 2) return;
       finished = true; clearInterval(collectorTimer);
       try { await send({ type: 'mbStudioSummaryResult', nonce: job.nonce, range: job.context.range, metrics }); } catch {}

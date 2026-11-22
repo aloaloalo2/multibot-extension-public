@@ -5,7 +5,7 @@ const vm=require('node:vm');
 const {percentage,count,average,exploreMetrics,contentMetrics,context}=require('../yt-studio-summary.js');
 const {cleanMetrics,validate}=require('../yt-studio-summary-worker.js');
 const channel='UC87K7-Uo17LpO5v3VWaO9iw';
-const columns=['EXTERNAL_VIEWS','AVERAGE_WATCH_PERCENTAGE','RATINGS_LIKES','SHARINGS'];
+const columns=['EXTERNAL_VIEWS','AVERAGE_WATCH_PERCENTAGE','AVERAGE_WATCH_TIME','SHARINGS'];
 const url=`https://studio.youtube.com/channel/${channel}/analytics/hub_content/explore?time_period=4_weeks&dimension=VIDEO&${columns.map(c=>'t_metrics='+c).join('&')}`;
 const shown={closest:()=>null,getClientRects:()=>[{}]};
 const node=textContent=>({textContent,...shown});
@@ -14,13 +14,13 @@ function report(rows){
     querySelector:()=>node(title),querySelectorAll:()=>cells.map(node)
   }))}:null};
 }
-test('explore averages percentage viewed, likes and shares per video; totals and zero-view videos are excluded',()=>{
-  const m=exploreMetrics(report([['Итого','1010','21,4 %','110','30'],['A','1000','20 %','100','10'],['B','10','40,0 %','10','0'],['C','0','—','0','1'],['D','20','—','—','—']]),url);
+test('explore averages percentage viewed, view length and shares per video; totals and zero-view videos are excluded',()=>{
+  const m=exploreMetrics(report([['Итого','1010','21,4 %','4:00','30'],['A','1000','20 %','3:00','10'],['B','10','40,0 %','1:05:00','0'],['C','0','—','9:00','1'],['D','20','—','—','—']]),url);
   assert.equal(m.duration.value,30);assert.equal(m.duration.count,2);
-  assert.equal(m.likes.value,55);assert.equal(m.likes.count,2);
   assert.equal(m.shares.value,0.5);
-  assert.equal(exploreMetrics(report([['A','1','10 %','0','2']]),url).shares.value,200);
-  assert.equal(exploreMetrics(report([['A','10','10 %','20','0']]),url).likes,undefined);
+  assert.equal(m.avd.value,(180+3900)/2);assert.equal(m.avd.count,2);assert.equal(m.likes,undefined);
+  assert.equal(m.shares.value,0.5);
+  assert.equal(exploreMetrics(report([['A','1','10 %','1:00','2']]),url).shares.value,200);
   assert.deepEqual(exploreMetrics(report([['A','10','10 %','1','1']]),url.replace('dimension=VIDEO','dimension=DAY')),{});
 });
 test('exact count parsing preserves zero, rejects rounded counts and unknown values',()=>{
@@ -60,7 +60,7 @@ test('cache context is isolated by channel and period, and rejects other pages a
   assert.equal(context(page(other),content),null);
   assert.equal(context(page(),url),null);
   assert.equal(context(page(),`https://studio.youtube.com/channel/${channel}/analytics/tab-overview/period-default`),null);
-  assert.deepEqual(new URL(a.exploreUrl).searchParams.getAll('t_metrics'),['EXTERNAL_VIEWS','AVERAGE_WATCH_PERCENTAGE','AVERAGE_WATCH_TIME','RATINGS_LIKES','SHARINGS']);
+  assert.deepEqual(new URL(a.exploreUrl).searchParams.getAll('t_metrics'),columns);
   assert.equal(new URL(a.exploreUrl).searchParams.get('entity_id'),channel);
   assert(validate(a,content));assert(!validate(a,content.replace(channel,other)));
   assert(!validate({...a,exploreUrl:'https://example.com/steal'},content));
@@ -75,19 +75,19 @@ test('one refresh opens «Расширенный режим», then «Конте
   assert.equal(created.length,1);assert.equal(created[0].url,ctx.exploreUrl);assert.equal(created[0].active,false);
   const probe=await call({type:'mbStudioSummaryProbe'},701,ctx.exploreUrl);
   assert.equal(probe.collector.mode,'explore');assert.equal(commands[0].params.enabled,true);
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:ctx.range,metrics:{duration:{value:21,count:3},likes:{value:1,count:3},shares:{value:3.14,count:3},ctr:{value:99,count:1}}},701,ctx.exploreUrl);
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:ctx.range,metrics:{duration:{value:21,count:3},avd:{value:200,count:3},shares:{value:3.14,count:3},ctr:{value:99,count:1}}},701,ctx.exploreUrl);
   assert.equal(local[ctx.key].metrics.shares.value,3.14);assert.equal(local[ctx.key].metrics.duration.value,21);assert.equal(local[ctx.key].metrics.ctr,undefined);
   assert.deepEqual(updated.map(u=>u.url),[ctx.contentUrl]);
   const second=await call({type:'mbStudioSummaryProbe'},701,ctx.contentUrl);
   assert.equal(second.collector.mode,'content');
-  await call({type:'mbStudioSummaryResult',nonce:second.collector.nonce,range:ctx.range,metrics:{ctr:{value:6.2,count:1},retention:{value:75,count:4},likes:{value:50,count:1}}},701,ctx.contentUrl);
-  assert.equal(local[ctx.key].metrics.ctr.value,6.2);assert.equal(local[ctx.key].metrics.likes.value,1);
+  await call({type:'mbStudioSummaryResult',nonce:second.collector.nonce,range:ctx.range,metrics:{ctr:{value:6.2,count:1},retention:{value:75,count:4},shares:{value:50,count:1}}},701,ctx.contentUrl);
+  assert.equal(local[ctx.key].metrics.ctr.value,6.2);assert.equal(local[ctx.key].metrics.shares.value,3.14);assert.equal(local[ctx.key].metrics.avd.value,200);
   assert.equal(local[ctx.key].loading,false);assert.deepEqual(closed,[701]);assert.equal(commands.at(-1).params.enabled,false);
 });
 test('storage accepts a measured zero and rejects unavailable values',()=>{
   const now=Date.now(), valid={value:0,count:1,source:'Studio'};
-  assert.deepEqual(Object.keys(cleanMetrics({ctr:valid,likes:{value:NaN,count:2}},now)),['ctr']);
-  assert.equal(cleanMetrics({likes:valid},now).likes.value,0);
+  assert.deepEqual(Object.keys(cleanMetrics({ctr:valid,shares:{value:NaN,count:2},likes:valid},now)),['ctr']);
+  assert.equal(cleanMetrics({shares:valid},now).shares.value,0);
 });
 function worker(initialLocal={},initialSession={},failAttach=false){
   const local=structuredClone(initialLocal),session=structuredClone(initialSession),listeners=[],created=[],closed=[],updated=[],timers=[],attached=[],detached=[],commands=[],tabs=new Map();
@@ -106,11 +106,11 @@ function worker(initialLocal={},initialSession={},failAttach=false){
 }
 test('page visits, missing metrics and stale caches never open a report',async()=>{
   const {call,ctx,created,local}=worker();
-  local[ctx.key]={channelId:channel,loading:true,metrics:{likes:{value:3,count:1,at:1}}};
+  local[ctx.key]={channelId:channel,loading:true,metrics:{shares:{value:3,count:1,at:1}}};
   await Promise.all([call({type:'mbStudioSummaryGet',context:ctx}),call({type:'mbStudioSummaryGet',context:ctx})]);
   await call({type:'mbStudioSummaryGet',context:ctx,metrics:{ctr:{value:4,count:1}}});
   assert.equal(created.length,0);assert.equal(local[ctx.key].loading,false);
-  assert.equal(local[ctx.key].metrics.ctr.value,4);assert.equal(local[ctx.key].metrics.likes.value,3);
+  assert.equal(local[ctx.key].metrics.ctr.value,4);assert.equal(local[ctx.key].metrics.shares.value,3);
 });
 test('only a manual refresh opens one likes report, deduplicates clicks and closes its own tab',async()=>{
   const {call,ctx,created,closed,updated,local,attached,detached,commands}=worker();
@@ -122,26 +122,26 @@ test('only a manual refresh opens one likes report, deduplicates clicks and clos
   assert.deepEqual(attached.map(target=>target.tabId),[701]);
   assert.equal(commands[0].method,'Emulation.setFocusEmulationEnabled');
   assert.equal(commands[0].params.enabled,true);assert.equal(commands[0].target.tabId,701);
-  await call({type:'mbStudioSummaryResult',nonce:'obsolete',range:ctx.range,metrics:{likes:{value:99,count:1}}},701,ctx.exploreUrl);
-  assert.equal(local[ctx.key].metrics.likes,undefined);
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'wrong period',metrics:{likes:{value:99,count:1}}},701,ctx.exploreUrl);
-  assert.equal(local[ctx.key].metrics.likes,undefined);
-  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:ctx.range,metrics:{likes:{value:0,count:1},ctr:{value:99,count:1}}},701,ctx.exploreUrl);
+  await call({type:'mbStudioSummaryResult',nonce:'obsolete',range:ctx.range,metrics:{shares:{value:99,count:1}}},701,ctx.exploreUrl);
+  assert.equal(local[ctx.key].metrics.shares,undefined);
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:'wrong period',metrics:{shares:{value:99,count:1}}},701,ctx.exploreUrl);
+  assert.equal(local[ctx.key].metrics.shares,undefined);
+  await call({type:'mbStudioSummaryResult',nonce:probe.collector.nonce,range:ctx.range,metrics:{shares:{value:0,count:1},ctr:{value:99,count:1}}},701,ctx.exploreUrl);
   assert.deepEqual(closed,[]);assert.deepEqual(updated.map(u=>u.url),[ctx.contentUrl]);
   const content=await call({type:'mbStudioSummaryProbe'},701,ctx.contentUrl);
   await call({type:'mbStudioSummaryResult',nonce:content.collector.nonce,range:ctx.range,metrics:{}},701,ctx.contentUrl);
   assert.deepEqual(closed,[701]);
   assert.deepEqual(detached.map(target=>target.tabId),[701]);assert.equal(commands.at(-1).params.enabled,false);
-  assert.equal(local[ctx.key].metrics.likes.value,0);assert.equal(local[ctx.key].loading,false);
+  assert.equal(local[ctx.key].metrics.shares.value,0);assert.equal(local[ctx.key].loading,false);
   assert.equal(local[ctx.key].metrics.ctr,undefined);
   await call({type:'mbStudioSummaryGet',context:ctx});assert.equal(created.length,1);
   await call({type:'mbStudioSummaryRefresh',context:ctx});await new Promise(setImmediate);
   assert.equal(created.length,2);
   const second=await call({type:'mbStudioSummaryProbe'},702,ctx.exploreUrl);
-  await call({type:'mbStudioSummaryResult',nonce:second.collector.nonce,range:ctx.range,metrics:{likes:{value:2.5,count:2}}},702,ctx.exploreUrl);
+  await call({type:'mbStudioSummaryResult',nonce:second.collector.nonce,range:ctx.range,metrics:{shares:{value:2.5,count:2}}},702,ctx.exploreUrl);
   const secondContent=await call({type:'mbStudioSummaryProbe'},702,ctx.contentUrl);
   await call({type:'mbStudioSummaryResult',nonce:secondContent.collector.nonce,range:ctx.range,metrics:{}},702,ctx.contentUrl);
-  assert.equal(local[ctx.key].metrics.likes.value,2.5);
+  assert.equal(local[ctx.key].metrics.shares.value,2.5);
   assert.equal((await call({type:'mbStudioSummaryGet',context:ctx},9,'https://example.com')).ok,false);
   assert.equal((await call({type:'mbStudioSummaryRefresh',context:ctx},9,'https://example.com')).ok,false);
 });
@@ -163,13 +163,13 @@ test('a timed out manual refresh waits for a new click and does not refresh anot
   const otherCtx=context(page(other),source);
   await call({type:'mbStudioSummaryGet',context:otherCtx},10,source);
   await call({type:'mbStudioSummaryGet',context:ctx});
-  assert.equal(created.length,1);assert.equal(local[otherCtx.key].metrics.likes,undefined);
+  assert.equal(created.length,1);assert.equal(local[otherCtx.key].metrics.shares,undefined);
 });
 test('the Insights table scores the channel on the Content list scale from its own averages',()=>{
   const {channelScore,exploreMetrics:em}=require('../yt-studio-summary.js');
   const at=1,m=value=>({value,count:3,at});
-  const r=channelScore({metrics:{ctr:m(4.5),duration:m(40),avd:m(270),likes:m(3.5),shares:m(0.8),retention:m(99)}});
-  assert.equal(r.value,54);assert.match(r.explain,/^CTR: 4,5% → 60\n/);assert.doesNotMatch(r.explain,/Длина/);
+  const r=channelScore({metrics:{ctr:m(4.5),duration:m(40),avd:m(270),shares:m(0.8),retention:m(99)}});
+  assert.equal(r.value,57);assert.match(r.explain,/^CTR: 4,5% → 60\n/);assert.doesNotMatch(r.explain,/Длина/);
   assert.equal(channelScore({metrics:{ctr:m(4.5)}}),null);assert.equal(channelScore(null),null);
   const cols=['EXTERNAL_VIEWS','AVERAGE_WATCH_TIME'],u=`https://studio.youtube.com/channel/${channel}/analytics/hub_content/explore?dimension=VIDEO&${cols.map(c=>'t_metrics='+c).join('&')}`;
   assert.equal(em(report([['A','10','3:00'],['B','10','1:05:00'],['C','0','9:00']]),u).avd.value,(180+3900)/2);
