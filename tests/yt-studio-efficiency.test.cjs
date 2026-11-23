@@ -110,7 +110,7 @@ test('agreement is the share of video pairs ordered like their views (50% is cha
 test('the CTR columns show each video CTR with its place among the channel videos',()=>{
   const p=eff.ctrPlaces({a:{views:500,impr:9000,ctr:6},b:{views:500,impr:9000,ctr:4},c:{views:500,impr:9000,ctr:2},q:{views:50,impr:500,ctr:9}});
   assert.equal(p.a.place,100);assert.equal(p.b.place,50);assert.equal(p.c.place,0);assert.equal(p.q,undefined);assert.equal(p.a.median,4);
-  assert.equal(eff.explainCtr(p.a),'CTR за всё время: 6%\nМедиана канала: 4%\nВыше, чем у 100% роликов канала\nПоказов: 9 000');
+  assert.equal(eff.explainCtr(p.a),'CTR за всё время: 6%\nМедиана канала за всё время: 4%\nВыше, чем у 100% роликов канала\nПоказов: 9 000');
 });
 test('the first two days of a video report are its «первые 48ч», with the publication date',()=>{
   const rows=eff.readDays(doc([['Итого','472','4 140','1,4 %','3:39','0'],['2 нояб. 2026 г.','10','72','1,4 %','2:30','0'],['3 нояб. 2026 г.','15','928','0,8 %','3:00','1']]));
@@ -128,4 +128,10 @@ test('«сейчас 48ч» covers the last 2 California days before yesterday, 
   assert.deepEqual(eff.recentRange(Date.parse('2026-11-22T10:00:00Z')).split(',').map(x=>new Date(+x).toISOString()),['2026-11-19T08:00:00.000Z','2026-11-21T08:00:00.000Z']);
   const {recentUrl}=require('../yt-studio-summary-worker.js');
   assert.equal(new URL(recentUrl('UC8oU4MP1dV8FTp33W7Usiyw',0,Date.parse('2026-11-22T10:00:00Z'))).searchParams.get('time_period'),eff.recentRange(Date.parse('2026-11-22T10:00:00Z')));
+});
+test('all three CTR lines are coloured on the channel lifetime scale: one CTR, one colour',()=>{
+  const scale=[2,3,4,5,6];
+  const a=eff.ctrPlaces({x:{views:50,ctr:2.7}},10,scale).x, b=eff.ctrPlaces({x:{views:50,ctr:3.1}},10,scale).x;
+  assert.ok(b.place>a.place);assert.equal(a.median,4);
+  assert.equal(eff.ctrPlaces({x:{views:50,ctr:4}},10,scale).x.place,50);
 });

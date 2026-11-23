@@ -211,18 +211,21 @@
   // The CTR columns (author, 22 November 2026: of every Studio measure only CTR followed views on all large channels,
   // 66% of video pairs; a hit with CTR under the channel's median did not occur on two of them). Each video's CTR with
   // its place among the channel's videos: the share of them it beats, and the channel's median.
-  function ctrPlaces(byId, minViews = MIN_NOW_VIEWS) {
+  // `scale`: the channel's lifetime CTRs. All three lines are placed on it, so one CTR always gets one colour
+  // (author, 23 November 2026: 2,7% green in one line and 3,1% red in another made no sense).
+  function ctrPlaces(byId, minViews = MIN_NOW_VIEWS, scale = null) {
     const known = Object.entries(byId || {}).filter(([, v]) => v.views >= minViews && Number.isFinite(v.ctr));
-    const all = known.map(([, v]) => v.ctr).sort((a, b) => a - b), result = {};
+    const all = (scale || known.map(([, v]) => v.ctr)).slice().sort((a, b) => a - b), result = {};
     const median = all.length ? (all[(all.length - 1) >> 1] + all[all.length >> 1]) / 2 : null;
     for (const [id, v] of known) {
       const below = all.filter(x => x < v.ctr).length, equal = all.filter(x => x === v.ctr).length;
-      result[id] = { ctr: v.ctr, place: all.length < 2 ? 50 : (below + (equal - 1) / 2) / (all.length - 1) * 100, median, impr: v.impr };
+      const place = all.length < 2 ? 50 : scale ? (below + equal / 2) / all.length * 100 : (below + (equal - 1) / 2) / (all.length - 1) * 100;
+      result[id] = { ctr: v.ctr, place, median, impr: v.impr };
     }
     return result;
   }
   function explainCtr(r, period = 'за всё время') {
-    return `CTR ${period}: ${one(r.ctr)}%\nМедиана канала: ${one(r.median)}%\nВыше, чем у ${Math.round(r.place)}% роликов канала` +
+    return `CTR ${period}: ${one(r.ctr)}%\nМедиана канала за всё время: ${one(r.median)}%\nВыше, чем у ${Math.round(r.place)}% роликов канала` +
       (Number.isFinite(r.impr) ? `\nПоказов: ${new Intl.NumberFormat('ru-RU').format(r.impr)}` : '');
   }
   const api = { ctrPlaces, explainCtr, agreement, learnWeights, spearman, sessionIndex, recentRange, recentUrl, RECENT_DAYS, MIN_RECENT_VIEWS, dayUrl, readDays, early, parseDate, measures, scores, explain, context, missing, weekUrl, readWeek, nowScores, explainNow, MEASURES, MAX_IDS };
@@ -278,8 +281,9 @@
     button.setAttribute('aria-label', button.title);
   }
   function rows() {
-    const lines = [['все', ctrPlaces(record?.now), 'за всё время'], ['первые 48ч', ctrPlaces(Object.fromEntries(Object.entries(record?.early || {}).filter(([, e]) => e.days === EARLY_DAYS)), MIN_EARLY_VIEWS), 'за первые 48 часов'],
-      ['сейчас 48ч', ctrPlaces(record?.recent, MIN_RECENT_VIEWS), 'за последние 48 часов']];
+    const scale = Object.values(record?.now || {}).filter(v => v.views >= MIN_NOW_VIEWS && Number.isFinite(v.ctr)).map(v => v.ctr);
+    const lines = [['все', ctrPlaces(record?.now, MIN_NOW_VIEWS, scale), 'за всё время'], ['первые 48ч', ctrPlaces(Object.fromEntries(Object.entries(record?.early || {}).filter(([, e]) => e.days === EARLY_DAYS)), MIN_EARLY_VIEWS, scale), 'за первые 48 часов'],
+      ['сейчас 48ч', ctrPlaces(record?.recent, MIN_RECENT_VIEWS, scale), 'за последние 48 часов']];
     const idOf = row => [...row.querySelectorAll('a[href]')].map(a => a.getAttribute('href').match(/\/video\/([\w-]{11})/)?.[1]).find(Boolean);
     for (const row of document.querySelectorAll('ytcp-video-row')) {
       const last = [...row.querySelectorAll('.cell-body[class*=tablecell-]')].filter(e => !e.hasAttribute(ROOT)).at(-1);
